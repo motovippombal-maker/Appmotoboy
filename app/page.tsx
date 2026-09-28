@@ -1,0 +1,2220 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Image from "next/image";
+import {
+  Activity,
+  Bell,
+  Bike,
+  Check,
+  ChevronRight,
+  CircleDollarSign,
+  Clock3,
+  CreditCard,
+  Crosshair,
+  Gauge,
+  Headphones,
+  LockKeyhole,
+  MapPin,
+  MessageCircle,
+  Navigation,
+  Phone,
+  Route,
+  ShieldCheck,
+  Star,
+  Users,
+  Wallet,
+  X,
+} from "lucide-react";
+import { AuthPortal } from "@/components/auth/auth-portal";
+import { RealMap, type LivePoint } from "@/components/map/real-map";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  useMotoVip,
+  type FareConfig,
+  type NearbyDriver,
+  type Ride,
+} from "@/hooks/use-moto-vip";
+
+type Backend = ReturnType<typeof useMotoVip>;
+type Estimate = {
+  origin: { address: string; lat: number; lng: number };
+  destination: { address: string; lat: number; lng: number };
+  distanceMeters: number;
+  durationSeconds: number;
+  geometry: string;
+  fareCents: number;
+  fareRegion: { id: string; name: string; isDefault: boolean };
+  pricingMode: "region";
+};
+
+function money(cents = 0) {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(cents / 100);
+}
+function minutes(seconds = 0) {
+  return Math.max(1, Math.round(seconds / 60));
+}
+function initials(name = "Moto VIP") {
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+function distanceMeters(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+) {
+  const rad = (value: number) => (value * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)));
+}
+function routePoints(geometry?: string) {
+  try {
+    const parsed = JSON.parse(geometry || "{}") as {
+      coordinates?: Array<[number, number]>;
+    };
+    return (
+      parsed.coordinates?.map(([lng, lat]) => [lat, lng] as [number, number]) ||
+      []
+    );
+  } catch {
+    return [];
+  }
+}
+function durationLabel(seconds = 0) {
+  const total = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(total / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  return hours ? `${hours}h ${mins}min` : `${Math.max(1, mins)} min`;
+}
+function paymentLabel(status?: string) {
+  return (
+    (
+      {
+        aguardando_pagamento: "Pendente",
+        pago: "Pago",
+        expirado: "Expirado",
+        falhou: "Falhou",
+        reembolsado: "Reembolsado",
+        cancelado: "Cancelado",
+      } as Record<string, string>
+    )[status || ""] || "Pendente"
+  );
+}
+
+function Brand({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className="brand-lockup" aria-label="Moto VIP">
+      <span className="brand-mark">
+        <Bike aria-hidden="true" />
+      </span>
+      <span className="brand-name">
+        MOTO <b>VIP</b>
+        {!compact && <small>RIBEIRA DO POMBAL</small>}
+      </span>
+    </div>
+  );
+}
+
+function AvatarPhoto({ src, alt }: { src: string; alt: string }) {
+  return <Image src={src} alt={alt} fill sizes="52px" unoptimized />;
+}
+
+function PasswordRecovery({ backend }: { backend: Backend }) {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setMessage("");
+    if (password.length < 8) {
+      setMessage("Use uma senha com pelo menos 8 caracteres.");
+      return;
+    }
+    if (password !== confirmation) {
+      setMessage("As senhas não coincidem.");
+      return;
+    }
+    setBusy(true);
+    const result = await backend.updatePassword(password);
+    setMessage(
+      result.error?.message ||
+        "Senha atualizada. Você já pode continuar no Moto VIP.",
+    );
+    setBusy(false);
+  }
+  return (
+    <main className="auth-page">
+      <section className="auth-brand">
+        <div className="auth-logo">
+          <Bike />
+        </div>
+        <span>
+          MOTO <b>VIP</b>
+        </span>
+        <p>Mobilidade rápida e segura em Ribeira do Pombal.</p>
+      </section>
+      <section className="auth-card">
+        <span className="auth-kicker">RECUPERAÇÃO SEGURA</span>
+        <h1>Crie uma nova senha</h1>
+        <p>Use pelo menos 8 caracteres.</p>
+        <form onSubmit={submit}>
+          <label>
+            <LockKeyhole />
+            <input
+              required
+              minLength={8}
+              type="password"
+              placeholder="Nova senha"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
+          <label>
+            <LockKeyhole />
+            <input
+              required
+              minLength={8}
+              type="password"
+              placeholder="Confirmar nova senha"
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+            />
+          </label>
+          {message && (
+            <div className="auth-message" role="status">
+              {message}
+            </div>
+          )}
+          <Button disabled={busy} className="primary-cta">
+            {busy ? "AGUARDE…" : "SALVAR NOVA SENHA"}
+          </Button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function MapCanvas({
+  origin,
+  destination,
+  driver,
+  nearbyDrivers = [],
+  route = [],
+  admin = false,
+}: {
+  origin?: LivePoint;
+  destination?: LivePoint;
+  driver?: LivePoint;
+  nearbyDrivers?: NearbyDriver[];
+  route?: Array<[number, number]>;
+  admin?: boolean;
+}) {
+  const [locationStatus, setLocationStatus] = useState(
+    "Usar minha localização",
+  );
+  const [currentLocation, setCurrentLocation] = useState<LivePoint>();
+  function requestLocation() {
+    if (!("geolocation" in navigator)) {
+      setLocationStatus("GPS indisponível");
+      return;
+    }
+    setLocationStatus("Localizando…");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setCurrentLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          label: "Sua localização",
+        });
+        setLocationStatus("Localização ativa");
+      },
+      () => setLocationStatus("Permissão necessária"),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 },
+    );
+  }
+  return (
+    <div
+      className={`map-canvas ${admin ? "map-admin" : ""}`}
+      role="region"
+      aria-label="Mapa da corrida"
+    >
+      <RealMap
+        origin={origin || currentLocation}
+        destination={destination}
+        driver={driver}
+        nearbyDrivers={nearbyDrivers.map((point) => ({
+          lat: point.latitude,
+          lng: point.longitude,
+          label: `Motorista disponível · ${(point.distanceMeters / 1000).toFixed(1)} km`,
+        }))}
+        route={route}
+      />
+      <div className="map-tools">
+        <button
+          aria-label={locationStatus}
+          title={locationStatus}
+          onClick={requestLocation}
+        >
+          <Crosshair />
+        </button>
+        <span className="map-provider">OPENSTREETMAP · ROTA REAL</span>
+      </div>
+    </div>
+  );
+}
+
+function AddressField({
+  icon,
+  label,
+  value,
+  onChange,
+  accent,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  accent?: boolean;
+}) {
+  return (
+    <label className={`address-field ${accent ? "accent" : ""}`}>
+      <span className="field-icon">{icon}</span>
+      <span className="field-copy">
+        <small>{label}</small>
+        <input
+          required
+          value={value}
+          placeholder="Digite um endereço"
+          onChange={(event) => onChange(event.target.value)}
+          aria-label={label}
+        />
+      </span>
+      <ChevronRight className="field-chevron" />
+    </label>
+  );
+}
+
+function gpsPosition() {
+  return new Promise<GeolocationPosition>((resolve, reject) => {
+    if (!("geolocation" in navigator)) {
+      reject(new Error("Este aparelho não oferece acesso ao GPS."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      resolve,
+      (error) => reject(new Error(geolocationMessage(error))),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 },
+    );
+  });
+}
+
+function geolocationMessage(error: GeolocationPositionError) {
+  if (error.code === 1)
+    return "Permissão de localização negada. Autorize o GPS nas configurações do navegador.";
+  if (error.code === 2)
+    return "Localização indisponível. Verifique se o GPS do aparelho está ativado.";
+  if (error.code === 3)
+    return "O GPS demorou para responder. Vá para uma área aberta e tente novamente.";
+  return "O sinal de GPS foi perdido temporariamente.";
+}
+
+function rideStage(ride: Ride | null, hasEstimate: boolean) {
+  if (!ride) return hasEstimate ? "quote" : "draft";
+  if (["solicitada", "procurando_motorista"].includes(ride.status))
+    return "searching";
+  if (["aceita", "motorista_a_caminho"].includes(ride.status))
+    return "accepted";
+  if (ride.status === "motorista_chegou") return "arrived";
+  if (ride.status === "em_corrida") return "riding";
+  return "draft";
+}
+
+function NotificationsPanel({ backend }: { backend: Backend }) {
+  const [pushMessage, setPushMessage] = useState("");
+  async function enablePush() {
+    setPushMessage("");
+    try {
+      await backend.enablePushNotifications();
+      setPushMessage("Notificações Push ativadas neste aparelho.");
+    } catch (error) {
+      setPushMessage(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível ativar as notificações Push.",
+      );
+    }
+  }
+  return (
+    <details className="notification-panel">
+      <summary>
+        <span>
+          <Bell /> Notificações
+        </span>
+        {backend.unreadNotifications > 0 && (
+          <b>{backend.unreadNotifications}</b>
+        )}
+      </summary>
+      <div className="notification-actions">
+        <button onClick={enablePush}>ATIVAR PUSH</button>
+        {backend.unreadNotifications > 0 && (
+          <button onClick={() => backend.markNotificationsRead()}>
+            MARCAR COMO LIDAS
+          </button>
+        )}
+      </div>
+      {pushMessage && (
+        <small className="notification-message">{pushMessage}</small>
+      )}
+      <div className="notification-list">
+        {backend.notifications.length ? (
+          backend.notifications.slice(0, 8).map((item) => (
+            <button
+              key={item.id}
+              className={item.read_at ? "read" : ""}
+              onClick={() =>
+                !item.read_at && backend.markNotificationsRead(item.id)
+              }
+            >
+              <b>{item.title}</b>
+              <span>{item.body}</span>
+              <small>
+                {new Intl.DateTimeFormat("pt-BR", {
+                  dateStyle: "short",
+                  timeStyle: "short",
+                }).format(new Date(item.created_at))}
+              </small>
+            </button>
+          ))
+        ) : (
+          <p>Nenhuma notificação ainda.</p>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function PassengerPanel({ backend }: { backend: Backend }) {
+  const [originAddress, setOriginAddress] = useState("");
+  const [destinationAddress, setDestinationAddress] = useState("");
+  const [estimate, setEstimate] = useState<Estimate | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [nearbyDrivers, setNearbyDrivers] = useState<NearbyDriver[]>([]);
+  const [ratingScore, setRatingScore] = useState(5);
+  const [ratingComment, setRatingComment] = useState("");
+  const ride = backend.activeRide || backend.completedRide;
+  const stage =
+    backend.completedRide && !backend.activeRide
+      ? "finished"
+      : rideStage(ride, Boolean(estimate));
+  const origin = ride
+    ? { lat: ride.origin_lat, lng: ride.origin_lng, label: ride.origin_address }
+    : estimate
+      ? {
+          lat: estimate.origin.lat,
+          lng: estimate.origin.lng,
+          label: estimate.origin.address,
+        }
+      : undefined;
+  const destination = ride
+    ? {
+        lat: ride.destination_lat,
+        lng: ride.destination_lng,
+        label: ride.destination_address,
+      }
+    : estimate
+      ? {
+          lat: estimate.destination.lat,
+          lng: estimate.destination.lng,
+          label: estimate.destination.address,
+        }
+      : undefined;
+  const driverName = ride?.driver?.profiles?.full_name || "Seu Moto VIP";
+  const vehicle = ride?.driver?.vehicles?.[0];
+  const driverDistance =
+    ride && backend.driverLocation
+      ? distanceMeters(
+          { lat: backend.driverLocation.lat, lng: backend.driverLocation.lng },
+          { lat: ride.origin_lat, lng: ride.origin_lng },
+        )
+      : undefined;
+  const route = routePoints(ride?.route_geometry || estimate?.geometry);
+  const completedEntry = ride
+    ? backend.passengerHistory.find((item) => item.id === ride.id)
+    : undefined;
+  const payment = completedEntry?.payment;
+  const rating = completedEntry?.rating;
+
+  async function calculate() {
+    if (!destinationAddress.trim()) {
+      setNotice("Informe o destino.");
+      return;
+    }
+    setBusy(true);
+    setNotice("");
+    try {
+      const position = await gpsPosition().catch((error) => {
+        if (!originAddress.trim()) throw error;
+        return null;
+      });
+      if (!position && !originAddress.trim())
+        throw new Error("Ative o GPS ou informe o endereço de embarque.");
+      const result = await backend.estimateRide({
+        origin: {
+          address: position ? "Localização atual" : originAddress,
+          lat: position?.coords.latitude,
+          lng: position?.coords.longitude,
+        },
+        destination: { address: destinationAddress },
+      });
+      const nearby = await backend.findNearbyDrivers(result.origin);
+      setEstimate(result);
+      setOriginAddress(result.origin.address);
+      setDestinationAddress(result.destination.address);
+      setNearbyDrivers(nearby.drivers);
+      setNotice(
+        nearby.drivers.length
+          ? `${nearby.drivers.length} motorista(s) disponível(is) em até ${nearby.radiusKm.toFixed(1)} km.`
+          : `Nenhum motorista online com GPS recente em até ${nearby.radiusKm.toFixed(1)} km.`,
+      );
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível calcular a corrida.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function requestRide() {
+    if (!estimate) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await backend.requestRide({
+        origin: estimate.origin,
+        destination: estimate.destination,
+        paymentMethod: "pix",
+      });
+      setEstimate(null);
+      setNearbyDrivers([]);
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível solicitar a corrida.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function cancelRide() {
+    if (!ride) return;
+    setBusy(true);
+    try {
+      await backend.transitionRide(
+        ride.id,
+        "cancelada",
+        "Cancelada pelo passageiro",
+      );
+      await backend.refresh();
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Não foi possível cancelar.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function createPix() {
+    if (!ride) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await backend.createPixCharge(ride.id);
+      await backend.refresh();
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível gerar a cobrança Pix.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function submitRating() {
+    if (!ride) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await backend.rateRide(
+        ride.id,
+        ratingScore,
+        ratingComment.trim() || undefined,
+      );
+      await backend.refresh();
+      setNotice("Avaliação enviada. Obrigado!");
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Não foi possível avaliar.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const status =
+    stage === "draft"
+      ? [
+          "Pronto para ir?",
+          "Peça seu Moto VIP",
+          "Informe o destino para calcular sua corrida.",
+        ]
+      : stage === "quote"
+        ? [
+            "Resumo da corrida",
+            "Tudo certo para chamar",
+            "Preço e tempo calculados pela rota real.",
+          ]
+        : stage === "searching"
+          ? [
+              "Solicitação enviada",
+              "Procurando um Moto VIP próximo…",
+              "Motoristas online da região receberam sua solicitação.",
+            ]
+          : stage === "accepted"
+            ? [
+                "Corrida confirmada",
+                `${driverName} está a caminho`,
+                "Acompanhe a aproximação em tempo real.",
+              ]
+            : stage === "arrived"
+              ? [
+                  "Ele chegou",
+                  "Seu Moto VIP está esperando",
+                  "Encontre o motorista no ponto de embarque.",
+                ]
+              : stage === "finished"
+                ? [
+                    "Viagem concluída",
+                    "Corrida finalizada",
+                    "Resumo calculado e registrado pelo Moto VIP.",
+                  ]
+                : [
+                    "Corrida em andamento",
+                    "Rumo ao destino",
+                    `${minutes(ride?.estimated_duration_seconds || ride?.duration_seconds)} min estimados.`,
+                  ];
+  return (
+    <div className="passenger-shell">
+      <section className="passenger-map">
+        <MapCanvas
+          origin={origin}
+          destination={destination}
+          nearbyDrivers={nearbyDrivers}
+          route={route}
+          driver={
+            backend.driverLocation
+              ? {
+                  lat: backend.driverLocation.lat,
+                  lng: backend.driverLocation.lng,
+                  label: driverName,
+                }
+              : undefined
+          }
+        />
+      </section>
+      <section className="ride-sheet">
+        <div className="sheet-handle" />
+        <div className="status-heading">
+          <div>
+            <span>{status[0]}</span>
+            <h1>{status[1]}</h1>
+            <p>{status[2]}</p>
+          </div>
+          {stage === "searching" && (
+            <span className="search-pulse">
+              <i />
+            </span>
+          )}
+        </div>
+        {notice && (
+          <div className="auth-message" role="status">
+            {notice}
+          </div>
+        )}
+        {(stage === "draft" || stage === "quote") && (
+          <>
+            <div className="address-stack">
+              <AddressField
+                icon={<MapPin />}
+                label="Onde você está?"
+                value={originAddress}
+                onChange={setOriginAddress}
+              />
+              <AddressField
+                icon={<Navigation />}
+                label="Para onde você vai?"
+                value={destinationAddress}
+                onChange={setDestinationAddress}
+                accent
+              />
+            </div>
+            {estimate && (
+              <div className="quote-card">
+                <div className="quote-product">
+                  <span>
+                    <Bike />
+                  </span>
+                  <div>
+                    <b>
+                      {estimate.fareRegion.isDefault
+                        ? "Tarifa padrão da cidade"
+                        : `Tarifa ${estimate.fareRegion.name}`}
+                    </b>
+                    <small>
+                      Preço por região · cálculo protegido no servidor
+                    </small>
+                  </div>
+                  <strong>{money(estimate.fareCents)}</strong>
+                </div>
+                <div className="quote-meta">
+                  <span>
+                    <Route /> Rota informativa:{" "}
+                    {(estimate.distanceMeters / 1000).toFixed(1)} km
+                  </span>
+                  <span>
+                    <Clock3 /> Tempo estimado:{" "}
+                    {minutes(estimate.durationSeconds)} min
+                  </span>
+                  <span>
+                    <ShieldCheck /> Preço confirmado novamente ao solicitar
+                  </span>
+                </div>
+              </div>
+            )}
+            <Button
+              disabled={busy}
+              className="primary-cta"
+              onClick={estimate ? requestRide : calculate}
+            >
+              {busy
+                ? "AGUARDE…"
+                : estimate
+                  ? "CHAMAR MOTO VIP"
+                  : "VER VALOR DA CORRIDA"}
+              <ChevronRight />
+            </Button>
+          </>
+        )}
+        {stage === "searching" && (
+          <div className="searching-content">
+            <div className="finding-riders">
+              <span>
+                <Bike />
+              </span>
+              <span>
+                <Bike />
+              </span>
+              <span>
+                <Bike />
+              </span>
+            </div>
+            <div className="route-summary">
+              <span>
+                <MapPin /> {ride?.origin_address}
+              </span>
+              <i />
+              <span>
+                <Navigation /> {ride?.destination_address}
+              </span>
+            </div>
+            <Button
+              disabled={busy}
+              variant="outline"
+              className="secondary-cta"
+              onClick={cancelRide}
+            >
+              <X /> Cancelar solicitação
+            </Button>
+          </div>
+        )}
+        {stage === "finished" && ride && (
+          <div className="completion-card">
+            <div className="completion-check">
+              <Check />
+            </div>
+            <div className="completion-route">
+              <span>{ride.origin_address}</span>
+              <i>→</i>
+              <span>{ride.destination_address}</span>
+            </div>
+            <div className="completion-grid">
+              <div>
+                <small>Motorista</small>
+                <b>{driverName}</b>
+              </div>
+              <div>
+                <small>Distância percorrida</small>
+                <b>
+                  {((ride.actual_distance_meters || 0) / 1000).toFixed(2)} km
+                </b>
+              </div>
+              <div>
+                <small>Duração real</small>
+                <b>{durationLabel(ride.actual_duration_seconds)}</b>
+              </div>
+              <div>
+                <small>Valor final</small>
+                <b>{money(ride.final_fare_cents ?? ride.fare_cents)}</b>
+              </div>
+            </div>
+            <div className="payment-result">
+              <CreditCard />
+              <div>
+                <small>
+                  {ride.payment_method === "cash"
+                    ? "DINHEIRO · PAGAMENTO AO MOTORISTA"
+                    : "PIX"}
+                </small>
+                <b>{paymentLabel(payment?.status || ride.payment_status)}</b>
+              </div>
+              {ride.payment_method === "pix" && payment?.status !== "pago" && (
+                <Button disabled={busy} onClick={createPix}>
+                  GERAR PIX
+                </Button>
+              )}
+            </div>
+            {ride.payment_method === "pix" && (
+              <small className="completion-note">
+                O valor vem do fechamento do servidor. Sem provedor configurado,
+                nenhuma cobrança ou aprovação será criada.
+              </small>
+            )}
+            {rating ? (
+              <div className="rating-done">
+                <Star /> Avaliação enviada: {rating.score}/5
+              </div>
+            ) : (
+              <div className="rating-form">
+                <b>Avalie o motorista</b>
+                <div>
+                  {[1, 2, 3, 4, 5].map((score) => (
+                    <button
+                      key={score}
+                      className={score <= ratingScore ? "active" : ""}
+                      onClick={() => setRatingScore(score)}
+                      aria-label={`${score} estrelas`}
+                    >
+                      <Star />
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  maxLength={500}
+                  placeholder="Comentário opcional"
+                  value={ratingComment}
+                  onChange={(event) => setRatingComment(event.target.value)}
+                />
+                <Button
+                  disabled={busy}
+                  variant="outline"
+                  onClick={submitRating}
+                >
+                  ENVIAR AVALIAÇÃO
+                </Button>
+              </div>
+            )}
+            <Button
+              className="primary-cta"
+              onClick={backend.dismissCompletedRide}
+            >
+              NOVA CORRIDA
+              <ChevronRight />
+            </Button>
+          </div>
+        )}
+        {["accepted", "arrived", "riding"].includes(stage) && ride && (
+          <>
+            <div className="driver-card">
+              <div className="driver-avatar">
+                {ride.driver?.profiles?.avatar_url ? (
+                  <AvatarPhoto
+                    src={ride.driver.profiles.avatar_url}
+                    alt={`Foto de ${driverName}`}
+                  />
+                ) : (
+                  initials(driverName)
+                )}
+                <span className="verified">
+                  <Check />
+                </span>
+              </div>
+              <div className="driver-copy">
+                <b>{driverName}</b>
+                <span>
+                  <Star /> {ride.driver?.rating?.toFixed(1) || "—"}
+                </span>
+                <small>
+                  {vehicle
+                    ? `${vehicle.brand} ${vehicle.model} · ${vehicle.color} · ${vehicle.plate}`
+                    : "Veículo cadastrado"}
+                </small>
+              </div>
+              <div className="driver-actions">
+                {ride.driver?.profiles?.phone && (
+                  <a
+                    href={`tel:${ride.driver.profiles.phone}`}
+                    aria-label="Ligar"
+                  >
+                    <Phone />
+                  </a>
+                )}
+                <button aria-label="Mensagem">
+                  <MessageCircle />
+                </button>
+              </div>
+            </div>
+            <div className="ride-progress">
+              <span className="done">
+                <Check />
+              </span>
+              <i className="done" />
+              <span className={stage !== "accepted" ? "done" : "active"}>
+                {stage !== "accepted" ? <Check /> : "2"}
+              </span>
+              <i className={stage === "riding" ? "done" : ""} />
+              <span className={stage === "riding" ? "active" : ""}>3</span>
+              <div>
+                <small>Confirmada</small>
+                <small>Embarque</small>
+                <small>Destino</small>
+              </div>
+            </div>
+            <div className="arrival-note">
+              <Clock3 />
+              <div>
+                <b>
+                  {stage === "arrived"
+                    ? "Motorista no local"
+                    : stage === "riding"
+                      ? "Corrida em andamento"
+                      : "Motorista a caminho"}
+                </b>
+                <small>
+                  {driverDistance !== undefined && stage !== "riding"
+                    ? `${(driverDistance / 1000).toFixed(1)} km até você · `
+                    : ""}
+                  {minutes(ride.duration_seconds)} min estimados
+                </small>
+              </div>
+            </div>
+            {stage !== "riding" && (
+              <Button
+                disabled={busy}
+                variant="outline"
+                className="secondary-cta"
+                onClick={cancelRide}
+              >
+                <X /> Cancelar corrida
+              </Button>
+            )}
+          </>
+        )}
+        {stage === "draft" && (
+          <details className="history-panel">
+            <summary>
+              MINHAS CORRIDAS <span>{backend.passengerHistory.length}</span>
+            </summary>
+            <div>
+              {backend.passengerHistory.length ? (
+                backend.passengerHistory.map((item) => (
+                  <details key={item.id} className="history-item">
+                    <summary>
+                      <span>
+                        {new Intl.DateTimeFormat("pt-BR", {
+                          dateStyle: "short",
+                        }).format(
+                          new Date(item.completed_at || item.created_at),
+                        )}
+                        <b>{item.destination_address}</b>
+                      </span>
+                      <strong>
+                        {money(item.final_fare_cents ?? item.fare_cents)}
+                      </strong>
+                    </summary>
+                    <div>
+                      <p>
+                        {item.origin_address} → {item.destination_address}
+                      </p>
+                      <span>Motorista: {item.driver_name || "—"}</span>
+                      <span>
+                        {((item.actual_distance_meters || 0) / 1000).toFixed(2)}{" "}
+                        km · {durationLabel(item.actual_duration_seconds)}
+                      </span>
+                      <span>
+                        {item.payment?.method === "cash" ? "Dinheiro" : "Pix"} ·{" "}
+                        {paymentLabel(item.payment?.status)}
+                      </span>
+                      <span>
+                        {item.rating
+                          ? `Avaliação: ${item.rating.score}/5`
+                          : "Ainda não avaliada"}
+                      </span>
+                    </div>
+                  </details>
+                ))
+              ) : (
+                <p>Nenhuma corrida concluída.</p>
+              )}
+            </div>
+          </details>
+        )}
+        {stage === "draft" && <NotificationsPanel backend={backend} />}
+      </section>
+    </div>
+  );
+}
+
+function DriverPanel({ backend }: { backend: Backend }) {
+  const state = backend.driverState;
+  const ride = backend.activeRide;
+  const offer = backend.offers[0];
+  const online = Boolean(state?.online);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const vehicle = state?.vehicles?.[0];
+  const [offerSeconds, setOfferSeconds] = useState(0);
+  const [liveLocation, setLiveLocation] = useState<LivePoint>();
+  const [gpsStatus, setGpsStatus] = useState("GPS aguardando");
+  const [editing, setEditing] = useState(false);
+  const [avatar, setAvatar] = useState<File | null>(null);
+  const [driverForm, setDriverForm] = useState({
+    fullName: backend.profile?.full_name || "",
+    phone: backend.profile?.phone || "",
+    brand: vehicle?.brand || "",
+    model: vehicle?.model || "",
+    color: vehicle?.color || "",
+    plate: vehicle?.plate || "",
+  });
+  const rideId = ride?.id;
+  const updateLocation = backend.updateLocation;
+  useEffect(() => {
+    if (!online || !("geolocation" in navigator)) return;
+    const activeInterval = rideId ? 5000 : 20000;
+    let lastSentAt = 0;
+    let sending = false;
+    const watcher = navigator.geolocation.watchPosition(
+      (position) => {
+        setLiveLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          label: "Sua localização",
+        });
+        setGpsStatus(
+          `GPS ativo · precisão ${Math.round(position.coords.accuracy)} m`,
+        );
+        const now = Date.now();
+        if (sending || now - lastSentAt < activeInterval) return;
+        sending = true;
+        lastSentAt = now;
+        void updateLocation(position, rideId)
+          .catch((error) =>
+            setGpsStatus(
+              error instanceof Error
+                ? error.message
+                : "Falha temporária ao atualizar o GPS.",
+            ),
+          )
+          .finally(() => {
+            sending = false;
+          });
+      },
+      (error) => setGpsStatus(geolocationMessage(error)),
+      {
+        enableHighAccuracy: Boolean(rideId),
+        maximumAge: rideId ? 3000 : 15000,
+        timeout: 15000,
+      },
+    );
+    return () => navigator.geolocation.clearWatch(watcher);
+  }, [online, rideId, updateLocation]);
+  useEffect(() => {
+    if (!offer) return;
+    const update = () =>
+      setOfferSeconds(
+        Math.max(
+          0,
+          Math.ceil((new Date(offer.expires_at).getTime() - Date.now()) / 1000),
+        ),
+      );
+    const first = window.setTimeout(update, 0);
+    const timer = window.setInterval(update, 1000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+    };
+  }, [offer]);
+  async function toggle(next: boolean) {
+    setBusy(true);
+    setNotice("");
+    try {
+      const position = next ? await gpsPosition() : null;
+      await backend.setDriverStatus(next, position?.coords);
+      if (position) {
+        setLiveLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          label: "Sua localização",
+        });
+        setGpsStatus(
+          `GPS ativo · precisão ${Math.round(position.coords.accuracy)} m`,
+        );
+      } else {
+        setLiveLocation(undefined);
+        setGpsStatus("Compartilhamento encerrado");
+      }
+      await backend.refresh();
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível alterar o status.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  function startEditing() {
+    setDriverForm({
+      fullName: backend.profile?.full_name || "",
+      phone: backend.profile?.phone || "",
+      brand: vehicle?.brand || "",
+      model: vehicle?.model || "",
+      color: vehicle?.color || "",
+      plate: vehicle?.plate || "",
+    });
+    setEditing(true);
+  }
+  async function saveProfile(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setNotice("");
+    try {
+      const payload = new FormData();
+      Object.entries(driverForm).forEach(([key, value]) =>
+        payload.set(key, value),
+      );
+      if (avatar) payload.set("avatar", avatar);
+      await backend.saveDriverProfile(payload);
+      setEditing(false);
+      setAvatar(null);
+      setNotice("Dados enviados. Seu cadastro está aguardando aprovação.");
+      await backend.refresh();
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível salvar o cadastro.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function accept() {
+    if (!offer) return;
+    setBusy(true);
+    try {
+      await backend.acceptRide(offer.ride_id);
+      await backend.refresh();
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Corrida indisponível.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function decline() {
+    if (!offer) return;
+    setBusy(true);
+    try {
+      await backend.declineRide(offer.ride_id);
+      await backend.refresh();
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível recusar a oferta.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function cancelRide() {
+    if (!ride) return;
+    setBusy(true);
+    try {
+      await backend.transitionRide(
+        ride.id,
+        "cancelada",
+        "Cancelada pelo motorista",
+      );
+      await backend.refresh();
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível cancelar a corrida.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function advance() {
+    if (!ride) return;
+    const next: Record<string, string> = {
+      aceita: "motorista_a_caminho",
+      motorista_a_caminho: "motorista_chegou",
+      motorista_chegou: "em_corrida",
+      em_corrida: "finalizada",
+    };
+    const status = next[ride.status];
+    if (!status) return;
+    setBusy(true);
+    try {
+      await backend.transitionRide(ride.id, status);
+      await backend.refresh();
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível atualizar a corrida.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  const shownRide = ride || offer?.ride;
+  const origin = shownRide
+    ? {
+        lat: shownRide.origin_lat,
+        lng: shownRide.origin_lng,
+        label: shownRide.origin_address,
+      }
+    : undefined;
+  const destination = shownRide
+    ? {
+        lat: shownRide.destination_lat,
+        lng: shownRide.destination_lng,
+        label: shownRide.destination_address,
+      }
+    : undefined;
+  const route = routePoints(shownRide?.route_geometry);
+  return (
+    <div className="driver-shell">
+      <aside className="driver-sidebar">
+        <div className="driver-profile">
+          <div className="driver-avatar small">
+            {backend.driverAvatarUrl ? (
+              <AvatarPhoto
+                src={backend.driverAvatarUrl}
+                alt="Foto do motorista"
+              />
+            ) : (
+              initials(backend.profile?.full_name)
+            )}
+          </div>
+          <div>
+            <b>Olá, {backend.profile?.full_name || "motoboy"}</b>
+            <small>
+              {vehicle
+                ? `${vehicle.brand} ${vehicle.model} · ${vehicle.plate}`
+                : "Complete o cadastro da sua moto"}
+            </small>
+          </div>
+          <button className="edit-driver" onClick={startEditing}>
+            Editar
+          </button>
+        </div>
+        <div className={`online-card ${online ? "is-online" : ""}`}>
+          <div>
+            <span className="online-dot" />
+            <div>
+              <b>{online ? "Você está online" : "Você está offline"}</b>
+              <small>
+                {state?.approval_status === "rejected"
+                  ? "Cadastro recusado. Revise os dados."
+                  : state?.approval_status === "suspended"
+                    ? "Cadastro bloqueado pela central"
+                    : state?.approval_status !== "approved"
+                      ? "Cadastro aguardando aprovação"
+                      : online
+                        ? gpsStatus
+                        : "Fique online para começar"}
+              </small>
+            </div>
+          </div>
+          <Switch
+            disabled={busy || state?.approval_status !== "approved" || !vehicle}
+            checked={online}
+            onCheckedChange={toggle}
+            aria-label="Alterar disponibilidade"
+          />
+        </div>
+        {(editing || !vehicle) && (
+          <form className="driver-registration" onSubmit={saveProfile}>
+            <span>DADOS DO MOTORISTA</span>
+            <input
+              required
+              placeholder="Nome completo"
+              value={driverForm.fullName}
+              onChange={(event) =>
+                setDriverForm((value) => ({
+                  ...value,
+                  fullName: event.target.value,
+                }))
+              }
+            />
+            <input
+              required
+              placeholder="Telefone"
+              value={driverForm.phone}
+              onChange={(event) =>
+                setDriverForm((value) => ({
+                  ...value,
+                  phone: event.target.value,
+                }))
+              }
+            />
+            <label className="avatar-upload">
+              Foto do perfil
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(event) => setAvatar(event.target.files?.[0] || null)}
+              />
+            </label>
+            <div className="vehicle-fields">
+              <input
+                required
+                placeholder="Marca"
+                value={driverForm.brand}
+                onChange={(event) =>
+                  setDriverForm((value) => ({
+                    ...value,
+                    brand: event.target.value,
+                  }))
+                }
+              />
+              <input
+                required
+                placeholder="Modelo"
+                value={driverForm.model}
+                onChange={(event) =>
+                  setDriverForm((value) => ({
+                    ...value,
+                    model: event.target.value,
+                  }))
+                }
+              />
+              <input
+                required
+                placeholder="Cor"
+                value={driverForm.color}
+                onChange={(event) =>
+                  setDriverForm((value) => ({
+                    ...value,
+                    color: event.target.value,
+                  }))
+                }
+              />
+              <input
+                required
+                maxLength={7}
+                placeholder="Placa"
+                value={driverForm.plate}
+                onChange={(event) =>
+                  setDriverForm((value) => ({
+                    ...value,
+                    plate: event.target.value.toUpperCase(),
+                  }))
+                }
+              />
+            </div>
+            <Button disabled={busy}>
+              {busy ? "SALVANDO…" : "ENVIAR PARA APROVAÇÃO"}
+            </Button>
+          </form>
+        )}
+        <div className="driver-stats">
+          <div>
+            <Route />
+            <span>
+              <small>Corridas concluídas</small>
+              <b>{state?.trips_count || 0}</b>
+            </span>
+          </div>
+          <div>
+            <Star />
+            <span>
+              <small>Avaliação</small>
+              <b>{state?.rating?.toFixed(1) || "—"}</b>
+            </span>
+          </div>
+        </div>
+        <div className="safety-card">
+          <ShieldCheck />
+          <div>
+            <b>Central de suporte</b>
+            <small>Proteção ativa durante suas corridas</small>
+          </div>
+          <button>
+            <ChevronRight />
+          </button>
+        </div>
+        {backend.driverHistory && (
+          <details className="driver-earnings">
+            <summary>MINHAS CORRIDAS / GANHOS</summary>
+            <div className="earnings-grid">
+              <span>
+                <small>Hoje</small>
+                <b>{money(backend.driverHistory.totals.dayCents)}</b>
+              </span>
+              <span>
+                <small>Semana</small>
+                <b>{money(backend.driverHistory.totals.weekCents)}</b>
+              </span>
+              <span>
+                <small>Mês</small>
+                <b>{money(backend.driverHistory.totals.monthCents)}</b>
+              </span>
+            </div>
+            <small>Valores brutos. Comissão ainda não configurada.</small>
+            <div className="driver-history-list">
+              {backend.driverHistory.rides.slice(0, 10).map((item) => (
+                <div key={item.id}>
+                  <span>
+                    {new Intl.DateTimeFormat("pt-BR", {
+                      dateStyle: "short",
+                    }).format(new Date(item.completed_at || item.created_at))}
+                  </span>
+                  <b>{money(item.final_fare_cents ?? item.fare_cents)}</b>
+                  <small>
+                    {item.payment?.method === "cash" ? "Dinheiro" : "Pix"} ·{" "}
+                    {paymentLabel(item.payment?.status)}
+                  </small>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+        <NotificationsPanel backend={backend} />
+      </aside>
+      <main className="driver-main">
+        <MapCanvas
+          origin={origin}
+          destination={destination}
+          driver={liveLocation}
+          route={route}
+        />
+        {notice && <div className="backend-warning">{notice}</div>}
+        {!online && (
+          <div className="driver-empty">
+            <span>
+              <Bike />
+            </span>
+            <h2>
+              {state?.approval_status === "approved"
+                ? "Pronto para rodar?"
+                : "Cadastro em análise"}
+            </h2>
+            <p>
+              {state?.approval_status === "approved"
+                ? "Fique online para receber solicitações próximas."
+                : "A central precisa aprovar seus dados e sua moto."}
+            </p>
+            {state?.approval_status === "approved" && (
+              <Button disabled={busy} onClick={() => toggle(true)}>
+                FICAR ONLINE
+              </Button>
+            )}
+          </div>
+        )}
+        {online && !ride && !offer && (
+          <div className="driver-empty">
+            <span>
+              <Bike />
+            </span>
+            <h2>Você está disponível</h2>
+            <p>As novas solicitações aparecerão aqui em tempo real.</p>
+          </div>
+        )}
+        {online && !ride && offer && (
+          <div className="offer-card">
+            <div className="offer-head">
+              <div>
+                <span>NOVA CORRIDA</span>
+                <h2>{offer.passenger_name}</h2>
+              </div>
+              <b>{offerSeconds}s</b>
+            </div>
+            <div className="offer-route">
+              <div>
+                <span className="pickup-dot" />
+                <p>
+                  <small>BUSCAR</small>
+                  <b>{offer.ride.origin_address}</b>
+                </p>
+              </div>
+              <i />
+              <div>
+                <span className="drop-dot" />
+                <p>
+                  <small>DESTINO</small>
+                  <b>{offer.ride.destination_address}</b>
+                </p>
+              </div>
+            </div>
+            <div className="offer-numbers">
+              <div>
+                <small>Até o passageiro</small>
+                <b>
+                  {offer.distance_to_pickup_meters === null
+                    ? "GPS…"
+                    : `${(offer.distance_to_pickup_meters / 1000).toFixed(1)} km`}
+                </b>
+              </div>
+              <div>
+                <small>Corrida</small>
+                <b>{(offer.ride.distance_meters / 1000).toFixed(1)} km</b>
+              </div>
+              <div>
+                <small>Valor</small>
+                <b>{money(offer.ride.fare_cents)}</b>
+              </div>
+            </div>
+            <div className="offer-buttons">
+              <Button disabled={busy} variant="outline" onClick={decline}>
+                RECUSAR
+              </Button>
+              <Button disabled={busy} onClick={accept}>
+                ACEITAR CORRIDA
+              </Button>
+            </div>
+          </div>
+        )}
+        {ride && (
+          <div className="active-job-card">
+            <span className="job-kicker">
+              {ride.status === "motorista_chegou"
+                ? "NO LOCAL DE EMBARQUE"
+                : ride.status === "em_corrida"
+                  ? "CORRIDA EM ANDAMENTO"
+                  : "VÁ ATÉ O PASSAGEIRO"}
+            </span>
+            <div className="passenger-row">
+              <div className="passenger-avatar">
+                {initials(ride.passenger?.full_name || "Passageiro")}
+              </div>
+              <div>
+                <b>{ride.passenger?.full_name || "Passageiro"}</b>
+                <small>Corrida protegida</small>
+              </div>
+              {ride.passenger?.phone && (
+                <a href={`tel:${ride.passenger.phone}`} aria-label="Ligar">
+                  <Phone />
+                </a>
+              )}
+              <button aria-label="Mensagem">
+                <MessageCircle />
+              </button>
+            </div>
+            <div className="job-address">
+              <Navigation />
+              <div>
+                <small>
+                  {ride.status === "em_corrida"
+                    ? "DESTINO"
+                    : "LOCAL DE EMBARQUE"}
+                </small>
+                <b>
+                  {ride.status === "em_corrida"
+                    ? ride.destination_address
+                    : ride.origin_address}
+                </b>
+                <span>
+                  Rota estimada:{" "}
+                  {(
+                    (ride.estimated_distance_meters || ride.distance_meters) /
+                    1000
+                  ).toFixed(1)}{" "}
+                  km ·{" "}
+                  {minutes(
+                    ride.estimated_duration_seconds || ride.duration_seconds,
+                  )}{" "}
+                  min
+                </span>
+                {ride.status === "em_corrida" && (
+                  <span>
+                    Percorrido pelo GPS:{" "}
+                    {((ride.tracked_distance_meters || 0) / 1000).toFixed(2)} km
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="job-actions">
+              {ride.status !== "em_corrida" && (
+                <Button disabled={busy} variant="outline" onClick={cancelRide}>
+                  CANCELAR
+                </Button>
+              )}
+              <Button disabled={busy} className="primary-cta" onClick={advance}>
+                {ride.status === "aceita"
+                  ? "IR ATÉ PASSAGEIRO"
+                  : ride.status === "motorista_a_caminho"
+                    ? "CHEGUEI"
+                    : ride.status === "motorista_chegou"
+                      ? "INICIAR CORRIDA"
+                      : "FINALIZAR CORRIDA"}
+                <ChevronRight />
+              </Button>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function AdminPanel({ backend }: { backend: Backend }) {
+  const stats = backend.adminStats;
+  const trips = stats?.recentRides || [];
+  const drivers = stats?.drivers || [];
+  const finance = backend.adminFinance;
+  const [busyId, setBusyId] = useState("");
+  const [notice, setNotice] = useState("");
+  const [fareForm, setFareForm] = useState(() => {
+    const fare = backend.fareConfig;
+    return {
+      base: fare ? (fare.baseCents / 100).toFixed(2) : "",
+      perKm: fare ? (fare.perKmCents / 100).toFixed(2) : "",
+      perMinute: fare ? (fare.perMinuteCents / 100).toFixed(2) : "",
+      minimum: fare ? (fare.minimumCents / 100).toFixed(2) : "",
+    };
+  });
+  async function decide(driverId: string, status: "approved" | "rejected") {
+    setBusyId(driverId);
+    setNotice("");
+    try {
+      await backend.approveDriver(driverId, status);
+      await backend.refresh();
+      setNotice(
+        status === "approved" ? "Motorista aprovado." : "Cadastro recusado.",
+      );
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível atualizar o motorista.",
+      );
+    } finally {
+      setBusyId("");
+    }
+  }
+  async function saveFare(event: React.FormEvent) {
+    event.preventDefault();
+    setBusyId("fare");
+    setNotice("");
+    const toCents = (value: string) =>
+      Math.round(Number(value.replace(",", ".")) * 100);
+    const fare: FareConfig = {
+      baseCents: toCents(fareForm.base),
+      perKmCents: toCents(fareForm.perKm),
+      perMinuteCents: toCents(fareForm.perMinute),
+      minimumCents: toCents(fareForm.minimum),
+      configured: true,
+    };
+    try {
+      await backend.saveFareConfig(fare);
+      await backend.refresh();
+      setNotice("Estrutura futura de tarifa atualizada.");
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível salvar a tarifa.",
+      );
+    } finally {
+      setBusyId("");
+    }
+  }
+  async function saveRegion(
+    event: React.FormEvent<HTMLFormElement>,
+    region?: { id: string; is_default: boolean },
+  ) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const name = String(data.get("name") || "").trim();
+    const amountCents = Math.round(
+      Number(String(data.get("amount") || "").replace(",", ".")) * 100,
+    );
+    const active = region?.is_default || data.get("active") === "on";
+    const operation = `region-${region?.id || "new"}`;
+    setBusyId(operation);
+    setNotice("");
+    try {
+      await backend.saveFareRegion({
+        id: region?.id,
+        name,
+        amountCents,
+        active: Boolean(active),
+      });
+      await backend.refresh();
+      if (!region) form.reset();
+      setNotice(
+        region ? "Tarifa da região atualizada." : "Nova região cadastrada.",
+      );
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível salvar a região.",
+      );
+    } finally {
+      setBusyId("");
+    }
+  }
+  const approvalLabel = (status: string) =>
+    status === "approved"
+      ? "Aprovado"
+      : status === "rejected"
+        ? "Recusado"
+        : status === "suspended"
+          ? "Bloqueado"
+          : "Pendente";
+  return (
+    <div className="admin-shell">
+      <aside className="admin-nav">
+        <Brand compact />
+        <nav aria-label="Menu administrativo">
+          <button className="active">
+            <Gauge /> Visão geral
+          </button>
+          <button>
+            <Route /> Corridas
+          </button>
+          <button>
+            <Bike /> Motoboys
+          </button>
+          <button>
+            <Users /> Passageiros
+          </button>
+          <button>
+            <Wallet /> Financeiro
+          </button>
+          <button>
+            <Headphones /> Suporte
+          </button>
+        </nav>
+        <div className="admin-user">
+          <span>MV</span>
+          <div>
+            <b>{backend.profile?.full_name || "Central Moto VIP"}</b>
+            <small>Administrador</small>
+          </div>
+        </div>
+      </aside>
+      <main className="admin-main">
+        <header className="admin-header">
+          <div>
+            <span>
+              {new Intl.DateTimeFormat("pt-BR", { dateStyle: "full" })
+                .format(new Date())
+                .toUpperCase()}
+            </span>
+            <h1>Operação em tempo real</h1>
+          </div>
+          <div className="operation-live">
+            <i /> Supabase conectado
+          </div>
+        </header>
+        <section className="kpi-grid">
+          <article>
+            <span className="kpi-icon blue">
+              <Activity />
+            </span>
+            <div>
+              <small>Corridas hoje</small>
+              <strong>{stats?.ridesToday || 0}</strong>
+              <em>Dados reais</em>
+            </div>
+          </article>
+          <article>
+            <span className="kpi-icon green">
+              <Bike />
+            </span>
+            <div>
+              <small>Motoboys online</small>
+              <strong>{stats?.driversOnline || 0}</strong>
+              <em>{stats?.driversAvailable || 0} disponíveis</em>
+            </div>
+          </article>
+          <article>
+            <span className="kpi-icon red">
+              <Clock3 />
+            </span>
+            <div>
+              <small>Espera média</small>
+              <strong>
+                {stats?.averageWaitMinutes.toFixed(1) || "0,0"} min
+              </strong>
+              <em>Hoje</em>
+            </div>
+          </article>
+          <article>
+            <span className="kpi-icon amber">
+              <CircleDollarSign />
+            </span>
+            <div>
+              <small>Faturamento</small>
+              <strong>{money(stats?.revenueCents)}</strong>
+              <em>Corridas finalizadas</em>
+            </div>
+          </article>
+        </section>
+        <section className="admin-grid">
+          <article className="live-map-card">
+            <div className="card-title">
+              <div>
+                <span>MAPA OPERACIONAL</span>
+                <h2>Ribeira do Pombal agora</h2>
+              </div>
+            </div>
+            <MapCanvas admin />
+          </article>
+          <article className="demand-card">
+            <div className="card-title">
+              <div>
+                <span>DEMANDA</span>
+                <h2>Dados operacionais</h2>
+              </div>
+            </div>
+            <div className="demand-now">
+              <Activity />
+              <div>
+                <b>Monitoramento real ativo</b>
+                <small>
+                  O histórico será formado conforme as corridas forem
+                  concluídas.
+                </small>
+              </div>
+            </div>
+          </article>
+        </section>
+        <section className="region-fares-card">
+          <div className="card-title">
+            <div>
+              <span>FINANCEIRO</span>
+              <h2>Tarifas por Região</h2>
+            </div>
+            <em className="approval-status approved">Preço por bairro ativo</em>
+          </div>
+          <p>
+            O destino define o preço. Sem uma tarifa especial correspondente,
+            o sistema usa a tarifa padrão da cidade.
+          </p>
+          <div className="region-fare-table">
+            <div className="region-fare-head">
+              <span>Nome da região/bairro</span>
+              <span>Valor da corrida</span>
+              <span>Status</span>
+              <span>Ação</span>
+            </div>
+            {backend.fareRegions.map((region) => (
+              <form
+                key={region.id}
+                className="region-fare-row"
+                onSubmit={(event) => saveRegion(event, region)}
+              >
+                <input
+                  required
+                  name="name"
+                  maxLength={80}
+                  defaultValue={region.name}
+                  aria-label={`Nome da região ${region.name}`}
+                />
+                <label className="money-input">
+                  <span>R$</span>
+                  <input
+                    required
+                    name="amount"
+                    min="0.01"
+                    step="0.01"
+                    inputMode="decimal"
+                    defaultValue={(region.amount_cents / 100).toFixed(2)}
+                    aria-label={`Valor de ${region.name}`}
+                  />
+                </label>
+                <label className="region-active">
+                  <input
+                    type="checkbox"
+                    name="active"
+                    defaultChecked={region.active}
+                    disabled={region.is_default}
+                  />
+                  <span>{region.is_default ? "Padrão ativa" : "Ativa"}</span>
+                </label>
+                <Button disabled={busyId === `region-${region.id}`}>
+                  {busyId === `region-${region.id}` ? "SALVANDO…" : "SALVAR"}
+                </Button>
+              </form>
+            ))}
+            <form
+              className="region-fare-row region-fare-new"
+              onSubmit={(event) => saveRegion(event)}
+            >
+              <input
+                required
+                name="name"
+                maxLength={80}
+                placeholder="Novo bairro ou região"
+                aria-label="Nome da nova região"
+              />
+              <label className="money-input">
+                <span>R$</span>
+                <input
+                  required
+                  name="amount"
+                  min="0.01"
+                  step="0.01"
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  aria-label="Valor da nova região"
+                />
+              </label>
+              <label className="region-active">
+                <input type="checkbox" name="active" defaultChecked />
+                <span>Ativa</span>
+              </label>
+              <Button disabled={busyId === "region-new"}>
+                {busyId === "region-new" ? "ADICIONANDO…" : "ADICIONAR"}
+              </Button>
+            </form>
+          </div>
+        </section>
+        <section className="fare-settings-card">
+          <div className="card-title">
+            <div>
+              <span>ESTRUTURA FUTURA</span>
+              <h2>Tarifa por distância e tempo</h2>
+            </div>
+            <em className="approval-status">Não usada na cobrança atual</em>
+          </div>
+          <p>
+            Estrutura preservada para regras futuras. O valor por minuto inicial
+            permanece em R$ 0,00.
+          </p>
+          <form onSubmit={saveFare}>
+            {(
+              [
+                ["base", "Tarifa base"],
+                ["perKm", "Valor por km"],
+                ["perMinute", "Valor por minuto"],
+                ["minimum", "Tarifa mínima"],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key}>
+                <small>{label}</small>
+                <span>R$</span>
+                <input
+                  required
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={fareForm[key]}
+                  onChange={(event) =>
+                    setFareForm((current) => ({
+                      ...current,
+                      [key]: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            ))}
+            <Button disabled={busyId === "fare"}>
+              {busyId === "fare" ? "SALVANDO…" : "SALVAR PARA O FUTURO"}
+            </Button>
+          </form>
+        </section>
+        {finance && (
+          <section className="finance-card">
+            <div className="card-title">
+              <div>
+                <span>FINANCEIRO</span>
+                <h2>Resumo dos últimos 30 dias</h2>
+              </div>
+              <em className="approval-status">Comissão não configurada</em>
+            </div>
+            <div className="finance-summary">
+              <div>
+                <small>Corridas finalizadas</small>
+                <b>{finance.summary.completedRides}</b>
+              </div>
+              <div>
+                <small>Faturamento bruto</small>
+                <b>{money(finance.summary.grossCents)}</b>
+              </div>
+              <div>
+                <small>Pix confirmado</small>
+                <b>{money(finance.summary.pixPaidCents)}</b>
+              </div>
+              <div>
+                <small>Pagamentos pendentes</small>
+                <b>{money(finance.summary.pendingCents)}</b>
+              </div>
+              <div>
+                <small>Cancelamentos</small>
+                <b>{finance.summary.cancellations}</b>
+              </div>
+            </div>
+            <div className="finance-drivers">
+              {finance.byDriver.length ? (
+                finance.byDriver.map((item) => (
+                  <div key={item.driverId}>
+                    <span>
+                      <b>{item.driverName}</b>
+                      <small>{item.rides} corrida(s)</small>
+                    </span>
+                    <span>
+                      Bruto <b>{money(item.grossCents)}</b>
+                    </span>
+                    <span>
+                      Confirmado <b>{money(item.paidCents)}</b>
+                    </span>
+                    <span>
+                      Pendente <b>{money(item.pendingCents)}</b>
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <p>Nenhuma corrida finalizada no período.</p>
+              )}
+            </div>
+          </section>
+        )}
+        <section className="driver-approval-card">
+          <div className="card-title">
+            <div>
+              <span>CADASTROS</span>
+              <h2>Aprovação de motoboys</h2>
+            </div>
+          </div>
+          {notice && <div className="auth-message">{notice}</div>}
+          <div className="driver-directory">
+            {drivers.length ? (
+              drivers.map((driver) => {
+                const vehicle = driver.vehicles?.find(
+                  (item) => item.active !== false,
+                );
+                return (
+                  <article key={driver.profile_id}>
+                    <div className="driver-avatar small">
+                      {driver.profiles?.avatarUrl ? (
+                        <AvatarPhoto
+                          src={driver.profiles.avatarUrl}
+                          alt="Foto do motorista"
+                        />
+                      ) : (
+                        initials(driver.profiles?.full_name)
+                      )}
+                    </div>
+                    <div className="directory-copy">
+                      <b>
+                        {driver.profiles?.full_name || "Nome não informado"}
+                      </b>
+                      <small>
+                        {driver.profiles?.phone || "Telefone não informado"}
+                      </small>
+                      <span>
+                        {vehicle
+                          ? `${vehicle.brand} ${vehicle.model} · ${vehicle.color} · ${vehicle.plate}`
+                          : "Moto ainda não cadastrada"}
+                      </span>
+                    </div>
+                    <em className={`approval-status ${driver.approval_status}`}>
+                      {approvalLabel(driver.approval_status)}
+                    </em>
+                    {driver.approval_status === "pending" && (
+                      <div className="approval-actions">
+                        <Button
+                          disabled={busyId === driver.profile_id || !vehicle}
+                          variant="outline"
+                          onClick={() => decide(driver.profile_id, "rejected")}
+                        >
+                          Recusar
+                        </Button>
+                        <Button
+                          disabled={busyId === driver.profile_id || !vehicle}
+                          onClick={() => decide(driver.profile_id, "approved")}
+                        >
+                          Aprovar
+                        </Button>
+                      </div>
+                    )}
+                  </article>
+                );
+              })
+            ) : (
+              <div className="empty-table">Nenhum motorista cadastrado.</div>
+            )}
+          </div>
+        </section>
+        <section className="trips-card">
+          <div className="card-title">
+            <div>
+              <span>ACOMPANHAMENTO</span>
+              <h2>Corridas recentes</h2>
+            </div>
+          </div>
+          <div className="trips-table">
+            <div className="trip-row trip-head">
+              <span>Corrida</span>
+              <span>Passageiro</span>
+              <span>Trajeto</span>
+              <span>Status</span>
+              <span>Valor</span>
+            </div>
+            {trips.length ? (
+              trips.map((trip) => (
+                <div className="trip-row" key={trip.id}>
+                  <b>#{trip.id.slice(0, 8)}</b>
+                  <span>
+                    <b>{trip.passenger_id.slice(0, 8)}</b>
+                  </span>
+                  <span>
+                    {trip.origin_address} → {trip.destination_address}
+                  </span>
+                  <em
+                    className={`trip-status ${trip.status === "finalizada" ? "finished" : ""}`}
+                  >
+                    {trip.status.replaceAll("_", " ")}
+                  </em>
+                  <b>{money(trip.fare_cents)}</b>
+                </div>
+              ))
+            ) : (
+              <div className="empty-table">
+                Nenhuma corrida registrada ainda.
+              </div>
+            )}
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+export default function Home() {
+  const backend = useMotoVip();
+  const role = backend.profile?.role || "passenger";
+  const contextLabel =
+    role === "passenger"
+      ? "Passageiro"
+      : role === "driver"
+        ? "Motoboy"
+        : "Central";
+  if (backend.loading)
+    return (
+      <main className="auth-page">
+        <section className="auth-brand">
+          <Brand />
+          <p>Conectando com segurança…</p>
+        </section>
+      </main>
+    );
+  if (backend.passwordRecovery) return <PasswordRecovery backend={backend} />;
+  if (!backend.session)
+    return (
+      <AuthPortal
+        onSignIn={async (email, password) => {
+          const { error } = await backend.signIn(email, password);
+          return { error };
+        }}
+        onSignUp={async (input) => {
+          const { error, data } = await backend.signUp(input);
+          return {
+            error,
+            message: error
+              ? undefined
+              : data.session
+                ? "Cadastro realizado. Você já está conectado."
+                : "Cadastro realizado. Confirme o e-mail enviado para entrar.",
+          };
+        }}
+        onReset={async (email) => {
+          const { error } = await backend.resetPassword(email);
+          return {
+            error,
+            message: error
+              ? undefined
+              : "Se houver uma conta com este e-mail, enviaremos as instruções de recuperação.",
+          };
+        }}
+      />
+    );
+  return (
+    <Tabs value={role} className="app-root">
+      <header className="topbar">
+        <Brand />
+        <TabsList className="role-switch" aria-label="Ambiente autorizado">
+          {backend.profile?.role === "passenger" && (
+            <TabsTrigger value="passenger">
+              <MapPin /> Passageiro
+            </TabsTrigger>
+          )}
+          {backend.profile?.role === "driver" && (
+            <TabsTrigger value="driver">
+              <Bike /> Motoboy
+            </TabsTrigger>
+          )}
+          {backend.profile?.role === "admin" && (
+            <TabsTrigger value="admin">
+              <Gauge /> Central
+            </TabsTrigger>
+          )}
+        </TabsList>
+        <div className="account-actions">
+          <span>{backend.profile?.full_name || contextLabel}</span>
+          <button onClick={() => backend.signOut()}>Sair</button>
+        </div>
+      </header>
+      {backend.error && <div className="backend-warning">{backend.error}</div>}
+      <TabsContent value="passenger" className="screen">
+        <PassengerPanel backend={backend} />
+      </TabsContent>
+      <TabsContent value="driver" className="screen">
+        <DriverPanel backend={backend} />
+      </TabsContent>
+      <TabsContent value="admin" className="screen">
+        <AdminPanel backend={backend} />
+      </TabsContent>
+    </Tabs>
+  );
+}
