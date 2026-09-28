@@ -4,11 +4,13 @@ import { findNearbyDrivers } from "@/lib/backend/dispatch";
 import { calculateRoute } from "@/lib/backend/routing";
 import { requireConfiguredFare } from "@/lib/backend/fare";
 import { resolveRegionFare, reverseDestination } from "@/lib/backend/region-fare";
+import { applyCoupon } from "@/lib/backend/coupons";
 
 const schema = z.object({
   origin: z.object({ address: z.string().min(3).max(200), lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }),
   destination: z.object({ address: z.string().min(3).max(200), lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }),
   paymentMethod: z.enum(["pix", "cash"]).default("pix"),
+  couponCode: z.string().trim().min(3).max(24).optional(),
 });
 
 export async function POST(request: Request) {
@@ -28,9 +30,27 @@ export async function POST(request: Request) {
     const { data: fareConfig } = await supabase.from("system_settings").select("value").eq("key", "fare").single();
     requireConfiguredFare(fareConfig?.value);
     const regionalFare = await resolveRegionFare(supabase, verifiedDestination.displayName, verifiedDestination.labels);
-    const { data: ride, error } = await supabase.from("rides").insert({ passenger_id: user.id, status: "procurando_motorista", origin_address: input.origin.address, origin_lat: input.origin.lat, origin_lng: input.origin.lng, destination_address: input.destination.address, destination_lat: input.destination.lat, destination_lng: input.destination.lng, distance_meters: route.distanceMeters, duration_seconds: route.durationSeconds, route_geometry: route.geometry, fare_cents: regionalFare.fareCents, estimated_distance_meters: route.distanceMeters, estimated_duration_seconds: route.durationSeconds, estimated_fare_cents: regionalFare.fareCents, fare_region_id: regionalFare.fareRegion.id, fare_region_name: regionalFare.fareRegion.name, fare_pricing_mode: "region", fare_rule_snapshot: regionalFare.snapshot, payment_method: input.paymentMethod }).select().single();
+    const coupon = await applyCoupon(supabase, user.id, input.couponCode, regionalFare.fareCents);
+    const fareCents = coupon?.fareCents ?? regionalFare.fareCents;
+    const ridePayload: Record<string, unknown> = { passenger_id: user.id, status: "procurando_motorista", origin_address: input.origin.address, origin_lat: input.origin.lat, origin_lng: input.origin.lng, destination_address: input.destination.address, destination_lat: input.destination.lat, destination_lng: input.destination.lng, distance_meters: route.distanceMeters, duration_seconds: route.durationSeconds, route_geometry: route.geometry, fare_cents: fareCents, estimated_distance_meters: route.distanceMeters, estimated_duration_seconds: route.durationSeconds, estimated_fare_cents: fareCents, fare_region_id: regionalFare.fareRegion.id, fare_region_name: regionalFare.fareRegion.name, fare_pricing_mode: "region", fare_rule_snapshot: regionalFare.snapshot, payment_method: input.paymentMethod };
+    if (coupon) {
+      ridePayload.fare_rule_snapshot = { ...regionalFare.snapshot, coupon: { code: coupon.code, discountCents: coupon.discountCents } };
+      ridePayload.coupon_id = coupon.id;
+      ridePayload.coupon_code = coupon.code;
+      ridePayload.discount_cents = coupon.discountCents;
+      ridePayload.original_fare_cents = coupon.originalFareCents;
+    }
+    const { data: ride, error } = await supabase.from("rides").insert(ridePayload).select().single();
     if (error?.code === "23505") throw new ApiError(409, "A corrida já foi solicitada. Sincronize para acompanhar o estado atual.", "RIDE_REQUEST_ALREADY_EXISTS");
     if (error || !ride) throw error || new Error("Ride creation failed");
+
+    if (coupon) {
+      const { error: redemptionError } = await supabase.from("coupon_redemptions").insert({ coupon_id: coupon.id, user_id: user.id, ride_id: ride.id, discount_cents: coupon.discountCents });
+      if (redemptionError) {
+        await supabase.from("rides").update({ status: "cancelada", cancelled_at: new Date().toISOString(), cancelled_by: user.id, cancellation_reason: "Falha ao reservar o cupom" }).eq("id", ride.id);
+        throw new ApiError(409, "O cupom não está mais disponível. Calcule novamente.", "COUPON_REDEMPTION_FAILED");
+      }
+    }
 
     const { error: offersError } = await supabase.from("ride_requests").insert(nearby.map((driver) => ({ ride_id: ride.id, driver_id: driver.driverId, expires_at: new Date(Date.now() + config.offerSeconds * 1000).toISOString() })));
     if (offersError) {
@@ -39,7 +59,7 @@ export async function POST(request: Request) {
     }
     await supabase.from("passenger_locations").upsert({ passenger_id: user.id, ride_id: ride.id, latitude: input.origin.lat, longitude: input.origin.lng });
     await supabase.from("ride_history").insert({ ride_id: ride.id, to_status: "procurando_motorista", actor_id: user.id });
-    await audit(supabase, user.id, "ride.requested", "ride", ride.id, { offered_drivers: nearby.length, fare_region_id: regionalFare.fareRegion.id, fare_region_name: regionalFare.fareRegion.name, fare_cents: regionalFare.fareCents });
+    await audit(supabase, user.id, "ride.requested", "ride", ride.id, { offered_drivers: nearby.length, fare_region_id: regionalFare.fareRegion.id, fare_region_name: regionalFare.fareRegion.name, fare_cents: fareCents, coupon_code: coupon?.code ?? null, discount_cents: coupon?.discountCents ?? 0 });
     return Response.json({ ride, offeredDrivers: nearby.length, radiusKm: config.radiusKm }, { status: 201 });
   } catch (error) { return jsonError(error); }
 }

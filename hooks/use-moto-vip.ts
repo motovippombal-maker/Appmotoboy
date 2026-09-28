@@ -757,6 +757,9 @@ export function useMotoVip() {
         durationSeconds: number;
         geometry: string;
         fareCents: number;
+        originalFareCents: number;
+        discountCents: number;
+        coupon: { code: string; description: string | null } | null;
         fareRegion: { id: string; name: string; isDefault: boolean };
         pricingMode: "region";
       }>("/api/maps/estimate", {

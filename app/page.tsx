@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
   Activity,
@@ -77,6 +77,9 @@ type Estimate = {
   durationSeconds: number;
   geometry: string;
   fareCents: number;
+  originalFareCents?: number;
+  discountCents?: number;
+  coupon?: { code: string; description: string | null } | null;
   fareRegion: { id: string; name: string; isDefault: boolean };
   pricingMode: "region";
 };
@@ -307,6 +310,8 @@ function MapCanvas({
   origin,
   destination,
   driver,
+  currentLocation,
+  accuracyMeters,
   nearbyDrivers = [],
   route = [],
   admin = false,
@@ -316,6 +321,8 @@ function MapCanvas({
   origin?: LivePoint;
   destination?: LivePoint;
   driver?: LivePoint;
+  currentLocation?: LivePoint;
+  accuracyMeters?: number;
   nearbyDrivers?: NearbyDriver[];
   route?: Array<[number, number]>;
   admin?: boolean;
@@ -325,7 +332,19 @@ function MapCanvas({
   const [locationStatus, setLocationStatus] = useState(
     "Usar minha localização",
   );
-  const [currentLocation, setCurrentLocation] = useState<LivePoint>();
+  const [fallbackLocation, setFallbackLocation] = useState<LivePoint>();
+  const [fallbackAccuracy, setFallbackAccuracy] = useState<number>();
+  const [connectionExpanded, setConnectionExpanded] = useState(true);
+  useEffect(() => {
+    const reveal = window.setTimeout(() => setConnectionExpanded(true), 0);
+    const collapse = connected
+      ? window.setTimeout(() => setConnectionExpanded(false), 2800)
+      : undefined;
+    return () => {
+      window.clearTimeout(reveal);
+      if (collapse) window.clearTimeout(collapse);
+    };
+  }, [connected]);
   function requestLocation() {
     if (!("geolocation" in navigator)) {
       setLocationStatus("GPS indisponível");
@@ -334,11 +353,12 @@ function MapCanvas({
     setLocationStatus("Localizando…");
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setCurrentLocation({
+        setFallbackLocation({
           lat: position.coords.latitude,
           lng: position.coords.longitude,
-          label: "Sua localização",
+          label: "Você está aqui",
         });
+        setFallbackAccuracy(position.coords.accuracy);
         setLocationStatus("Localização ativa");
       },
       () => setLocationStatus("Permissão necessária"),
@@ -352,9 +372,11 @@ function MapCanvas({
       aria-label="Mapa da corrida"
     >
       <RealMap
-        origin={origin || currentLocation}
+        origin={origin}
         destination={destination}
         driver={driver}
+        currentLocation={currentLocation || fallbackLocation}
+        accuracyMeters={accuracyMeters ?? fallbackAccuracy}
         nearbyDrivers={nearbyDrivers.map((point) => ({
           lat: point.latitude,
           lng: point.longitude,
@@ -363,15 +385,20 @@ function MapCanvas({
         route={route}
       />
       {!admin && (
-        <div
-          className={`connection-pill ${connected ? "online" : "offline"}`}
+        <button
+          type="button"
+          className={`connection-pill ${connected ? "online" : "offline"} ${connected && !connectionExpanded ? "compact" : ""}`}
           role="status"
+          aria-label={
+            connected ? "Conectado ao Moto SyXp" : "Reconectando ao Moto SyXp"
+          }
+          onClick={() => setConnectionExpanded((value) => !value)}
         >
           {connected ? <Wifi /> : <WifiOff />}
           <span>
             {connected ? "Conectado ao Moto SyXp" : "Reconectando ao Moto SyXp"}
           </span>
-        </div>
+        </button>
       )}
       <div className="map-tools">
         <button
@@ -764,6 +791,10 @@ function PassengerPanel({ backend }: { backend: Backend }) {
     useState<AddressResult | null>(null);
   const [locationStatus, setLocationStatus] = useState("");
   const [gpsBusy, setGpsBusy] = useState(false);
+  const [deviceLocation, setDeviceLocation] = useState<LivePoint>();
+  const [gpsAccuracy, setGpsAccuracy] = useState<number>();
+  const [gpsTrackingEnabled, setGpsTrackingEnabled] = useState(false);
+  const backendRef = useRef(backend);
   const [mapPicker, setMapPicker] = useState<"origin" | "destination" | null>(
     null,
   );
@@ -776,6 +807,19 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   const [selectedQuickPlace, setSelectedQuickPlace] =
     useState<QuickPlace | null>(null);
   const [quickPlacesOpen, setQuickPlacesOpen] = useState(false);
+  const [destinationSearchOpen, setDestinationSearchOpen] = useState(false);
+  const [sheetMode, setSheetMode] = useState<
+    "collapsed" | "middle" | "expanded"
+  >("middle");
+  const [paymentMethod, setPaymentMethod] = useState<"pix" | "cash">("pix");
+  const [couponCode, setCouponCode] = useState("");
+  const [couponExpanded, setCouponExpanded] = useState(false);
+  const [couponBusy, setCouponBusy] = useState(false);
+  const sheetDragStart = useRef<{
+    y: number;
+    mode: "collapsed" | "middle" | "expanded";
+  } | null>(null);
+  const sheetDragged = useRef(false);
   const [quickPlaceSearch, setQuickPlaceSearch] = useState("");
   const [quickPlaceCategory, setQuickPlaceCategory] = useState<
     QuickPlace["category"] | "all"
@@ -786,6 +830,28 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   const [isOnline, setIsOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine,
   );
+  useEffect(() => {
+    backendRef.current = backend;
+  }, [backend]);
+  useEffect(() => {
+    if (!gpsTrackingEnabled || !("geolocation" in navigator)) return;
+    const watcher = navigator.geolocation.watchPosition(
+      (position) => {
+        setDeviceLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          label: "Você está aqui",
+        });
+        setGpsAccuracy(position.coords.accuracy);
+        void backendRef.current.updateLocation(position).catch(() => undefined);
+      },
+      (error) => {
+        if (error.code === 1) setLocationStatus(geolocationMessage(error));
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 },
+    );
+    return () => navigator.geolocation.clearWatch(watcher);
+  }, [gpsTrackingEnabled]);
   useEffect(() => {
     const online = () => setIsOnline(true);
     const offline = () => setIsOnline(false);
@@ -801,6 +867,16 @@ function PassengerPanel({ backend }: { backend: Backend }) {
     backend.completedRide && !backend.activeRide
       ? "finished"
       : rideStage(ride, Boolean(estimate));
+  useEffect(() => {
+    const refreshMap = () =>
+      document.dispatchEvent(new Event("moto-syxp:map-layout"));
+    const frame = window.requestAnimationFrame(refreshMap);
+    const settled = window.setTimeout(refreshMap, 280);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(settled);
+    };
+  }, [destinationSearchOpen, mapPicker, quickPlacesOpen, sheetMode, stage]);
   const origin = ride
     ? { lat: ride.origin_lat, lng: ride.origin_lng, label: ride.origin_address }
     : estimate
@@ -851,6 +927,13 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   const payment = completedEntry?.payment;
   const rating = completedEntry?.rating;
   const quickPlaces = backend.quickPlaces || [];
+  const recentDestinations = Array.from(
+    new Map(
+      backend.passengerHistory
+        .filter((item) => Boolean(item.destination_address))
+        .map((item) => [item.destination_address, item]),
+    ).values(),
+  ).slice(0, 3);
   const featuredQuickPlaces = quickPlaces
     .filter((place) => place.active && place.featured)
     .slice(0, 6);
@@ -867,9 +950,48 @@ function PassengerPanel({ backend }: { backend: Backend }) {
     );
   });
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSheetMode(
+        stage === "riding"
+          ? "collapsed"
+          : stage === "finished"
+            ? "expanded"
+            : "middle",
+      );
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [stage]);
+
+  useEffect(() => {
+    if (!destinationSearchOpen) return;
+    const frame = window.requestAnimationFrame(() =>
+      document.getElementById("destination-search-address")?.focus(),
+    );
+    return () => window.cancelAnimationFrame(frame);
+  }, [destinationSearchOpen]);
+
+  function changeSheetByDrag(clientY: number) {
+    const start = sheetDragStart.current;
+    if (!start) return;
+    const delta = clientY - start.y;
+    if (Math.abs(delta) < 42) return;
+    const modes = ["collapsed", "middle", "expanded"] as const;
+    const current = modes.indexOf(start.mode);
+    const next = delta < 0 ? Math.min(current + 1, 2) : Math.max(current - 1, 0);
+    setSheetMode(modes[next]);
+  }
+
   async function locateDevice() {
     setLocationStatus("Obtendo sua localização…");
     const position = await gpsPosition();
+    setDeviceLocation({
+      lat: position.coords.latitude,
+      lng: position.coords.longitude,
+      label: "Você está aqui",
+    });
+    setGpsAccuracy(position.coords.accuracy);
+    setGpsTrackingEnabled(true);
     const result = await backend.reverseAddress(
       position.coords.latitude,
       position.coords.longitude,
@@ -900,10 +1022,19 @@ function PassengerPanel({ backend }: { backend: Backend }) {
     }
   }
 
+  function chooseDestination(result: AddressResult, message = "Destino selecionado") {
+    setDestinationAddress(result.address);
+    setDestinationPoint(result);
+    setSelectedQuickPlace(null);
+    setEstimate(null);
+    setDestinationSearchOpen(false);
+    setSheetMode("middle");
+    setNotice(`${message}. Calculando a melhor rota…`);
+    void calculate(result);
+  }
+
   function chooseQuickPlace(place: QuickPlace) {
-    setSelectedQuickPlace(place);
-    setDestinationAddress(place.address);
-    setDestinationPoint({
+    const result: AddressResult = {
       id: place.id,
       address: place.address,
       shortAddress: place.name,
@@ -912,15 +1043,10 @@ function PassengerPanel({ backend }: { backend: Backend }) {
       city: "Ribeira do Pombal",
       state: "BA",
       approximate: false,
-    });
-    setEstimate(null);
+    };
+    setSelectedQuickPlace(place);
     setQuickPlacesOpen(false);
-    setNotice(
-      `${place.name} definido como destino. Toque em “Ver valor da corrida” para calcular a rota.`,
-    );
-    requestAnimationFrame(() =>
-      document.getElementById("destination-address")?.focus(),
-    );
+    chooseDestination(result, `${place.name} definido como destino`);
   }
 
   function openPanel(id: string) {
@@ -931,8 +1057,11 @@ function PassengerPanel({ backend }: { backend: Backend }) {
     }
   }
 
-  async function calculate() {
-    if (!destinationAddress.trim()) {
+  async function calculate(destinationOverride?: AddressResult) {
+    const resolvedDestination = destinationOverride || destinationPoint;
+    const requestedDestination =
+      resolvedDestination?.address || destinationAddress.trim();
+    if (!requestedDestination) {
       setNotice("Informe o destino.");
       return;
     }
@@ -954,11 +1083,11 @@ function PassengerPanel({ backend }: { backend: Backend }) {
               lng: resolvedOrigin.lng,
             }
           : { address: originAddress },
-        destination: destinationPoint
+        destination: resolvedDestination
           ? {
-              address: destinationPoint.address,
-              lat: destinationPoint.lat,
-              lng: destinationPoint.lng,
+              address: resolvedDestination.address,
+              lat: resolvedDestination.lat,
+              lng: resolvedDestination.lng,
             }
           : selectedQuickPlace
             ? {
@@ -966,7 +1095,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                 lat: selectedQuickPlace.latitude,
                 lng: selectedQuickPlace.longitude,
               }
-            : { address: destinationAddress },
+            : { address: requestedDestination },
       });
       const nearby = await backend.findNearbyDrivers(result.origin);
       setEstimate(result);
@@ -996,6 +1125,8 @@ function PassengerPanel({ backend }: { backend: Backend }) {
         approximate: false,
       });
       setNearbyDrivers(nearby.drivers);
+      setDestinationSearchOpen(false);
+      setSheetMode("middle");
       setNotice(
         nearby.drivers.length
           ? `${nearby.drivers.length} motorista(s) disponível(is) em até ${nearby.radiusKm.toFixed(1)} km.`
@@ -1019,7 +1150,8 @@ function PassengerPanel({ backend }: { backend: Backend }) {
       await backend.requestRide({
         origin: estimate.origin,
         destination: estimate.destination,
-        paymentMethod: "pix",
+        paymentMethod,
+        couponCode: estimate.coupon?.code,
       });
       setEstimate(null);
       setNearbyDrivers([]);
@@ -1031,6 +1163,35 @@ function PassengerPanel({ backend }: { backend: Backend }) {
       );
     } finally {
       setBusy(false);
+    }
+  }
+  async function validateCoupon() {
+    if (!estimate || couponCode.trim().length < 3) {
+      setNotice("Digite um cupom válido.");
+      return;
+    }
+    setCouponBusy(true);
+    setNotice("");
+    try {
+      const result = await backend.estimateRide({
+        origin: estimate.origin,
+        destination: estimate.destination,
+        couponCode: couponCode.trim(),
+      });
+      setEstimate(result);
+      setCouponCode(result.coupon?.code || couponCode.trim().toUpperCase());
+      setCouponExpanded(false);
+      setNotice(
+        result.discountCents
+          ? `Cupom ${result.coupon?.code} aplicado: ${money(result.discountCents)} de desconto.`
+          : "Cupom validado.",
+      );
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Não foi possível validar o cupom.",
+      );
+    } finally {
+      setCouponBusy(false);
     }
   }
   async function cancelRide() {
@@ -1132,11 +1293,15 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                     `${minutes(ride?.estimated_duration_seconds || ride?.duration_seconds)} min estimados.`,
                   ];
   return (
-    <div className="passenger-shell">
+    <div
+      className={`passenger-shell passenger-stage-${stage} sheet-${sheetMode}`}
+    >
       <section className="passenger-map">
         <MapCanvas
           origin={origin}
           destination={destination}
+          currentLocation={deviceLocation}
+          accuracyMeters={gpsAccuracy}
           nearbyDrivers={nearbyDrivers}
           route={route}
           connected={isOnline && backend.realtimeStatus !== "CLOSED"}
@@ -1152,8 +1317,40 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           }
         />
       </section>
-      <section className="ride-sheet">
-        <div className="sheet-handle" />
+      <section className={`ride-sheet sheet-${sheetMode}`}>
+        <button
+          type="button"
+          className="sheet-handle"
+          aria-label={`Painel ${sheetMode === "collapsed" ? "recolhido" : sheetMode === "middle" ? "intermediário" : "expandido"}. Arraste para ajustar.`}
+          onPointerDown={(event) => {
+            sheetDragStart.current = { y: event.clientY, mode: sheetMode };
+            sheetDragged.current = false;
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerUp={(event) => {
+            if (
+              sheetDragStart.current &&
+              Math.abs(event.clientY - sheetDragStart.current.y) >= 42
+            ) {
+              sheetDragged.current = true;
+            }
+            changeSheetByDrag(event.clientY);
+            sheetDragStart.current = null;
+          }}
+          onClick={() => {
+            if (sheetDragged.current) {
+              sheetDragged.current = false;
+              return;
+            }
+            setSheetMode((mode) =>
+              mode === "collapsed"
+                ? "middle"
+                : mode === "middle"
+                  ? "expanded"
+                  : "middle",
+            );
+          }}
+        />
         <div className="status-heading">
           <div>
             <span>{status[0]}</span>
@@ -1178,7 +1375,215 @@ function PassengerPanel({ backend }: { backend: Backend }) {
         )}
         {(stage === "draft" || stage === "quote") && (
           <>
-            <div className="address-stack">
+            <div className="passenger-progressive-flow">
+              {stage === "draft" && (
+                <>
+                  <button
+                    type="button"
+                    className="destination-launch"
+                    onClick={() => setDestinationSearchOpen(true)}
+                  >
+                    <Search />
+                    <span>
+                      <b>Para onde vamos?</b>
+                      <small>Busque rua, número ou ponto conhecido</small>
+                    </span>
+                    <ChevronRight />
+                  </button>
+                  {locationStatus && (
+                    <div
+                      className={`location-feedback ${locationStatus === "Localização encontrada" ? "success" : ""}`}
+                      role="status"
+                    >
+                      <Crosshair /> {locationStatus}
+                      {locationStatus !== "Localização encontrada" && (
+                        <button type="button" onClick={useCurrentLocation}>
+                          Tentar novamente
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <div className="progressive-quick-places" aria-label="Atalhos de destino">
+                    {featuredQuickPlaces.slice(0, 5).map((place) => (
+                      <button
+                        type="button"
+                        key={place.id}
+                        onClick={() => chooseQuickPlace(place)}
+                        title={place.address}
+                      >
+                        <QuickPlaceIcon name={place.icon} color={place.color} />
+                        <span>{place.name}</span>
+                      </button>
+                    ))}
+                    <button type="button" onClick={() => setQuickPlacesOpen(true)}>
+                      <span className="quick-more">•••</span>
+                      <span>Ver mais</span>
+                    </button>
+                  </div>
+                  {recentDestinations.length > 0 && (
+                    <div className="recent-destinations">
+                      <header>
+                        <b>Destinos recentes</b>
+                        <button
+                          type="button"
+                          onClick={() => openPanel("passenger-history")}
+                        >
+                          Ver todos
+                        </button>
+                      </header>
+                      {recentDestinations.map((item) => (
+                        <button
+                          type="button"
+                          key={item.id}
+                          onClick={() =>
+                            chooseDestination(
+                              {
+                                id: `recent-${item.id}`,
+                                address: item.destination_address,
+                                shortAddress: item.destination_address
+                                  .split(",")
+                                  .slice(0, 2)
+                                  .join(","),
+                                lat: item.destination_lat,
+                                lng: item.destination_lng,
+                                city: "Ribeira do Pombal",
+                                state: "BA",
+                                approximate: false,
+                              },
+                              "Destino recente selecionado",
+                            )
+                          }
+                        >
+                          <MapPin />
+                          <span>
+                            <b>{item.destination_address.split(",")[0]}</b>
+                            <small>
+                              {item.destination_address
+                                .split(",")
+                                .slice(1, 3)
+                                .join(",") || "Ribeira do Pombal - BA"}
+                            </small>
+                          </span>
+                          <History />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+              {stage === "quote" && estimate && (
+                <div className="mobile-route-preview">
+                  <div className="route-destination-copy">
+                    <MapPin />
+                    <span>
+                      <small>DESTINO</small>
+                      <b>{estimate.destination.address.split(",")[0]}</b>
+                      <em>{estimate.destination.address}</em>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setDestinationSearchOpen(true)}
+                    >
+                      Alterar
+                    </button>
+                  </div>
+                  <div className="route-metrics">
+                    <span>
+                      <Route />
+                      <b>{(estimate.distanceMeters / 1000).toFixed(1)} km</b>
+                      <small>Distância</small>
+                    </span>
+                    <span>
+                      <Clock3 />
+                      <b>{minutes(estimate.durationSeconds)} min</b>
+                      <small>Tempo estimado</small>
+                    </span>
+                  </div>
+                  <div className="ride-option-card">
+                    <span className="ride-option-bike">
+                      <Bike />
+                    </span>
+                    <span>
+                      <b>Moto SyXp</b>
+                      <small>
+                        {nearbyDrivers.length
+                          ? `${nearbyDrivers.length} motorista(s) disponível(is) na região · 1 passageiro`
+                          : "Serviço temporariamente indisponível nesta região"}
+                      </small>
+                    </span>
+                    <span className="ride-option-price">
+                      {Boolean(estimate.discountCents) && (
+                        <small>{money(estimate.originalFareCents || estimate.fareCents)}</small>
+                      )}
+                      <strong>{money(estimate.fareCents)}</strong>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="ride-config-row"
+                    onClick={() => setCouponExpanded((value) => !value)}
+                  >
+                    <Ticket /> <b>Cupom de desconto</b>
+                    <span>
+                      {estimate.coupon
+                        ? `${estimate.coupon.code} aplicado ✓`
+                        : "Adicionar cupom"}
+                    </span>
+                    <ChevronRight />
+                  </button>
+                  {couponExpanded && (
+                    <div className="coupon-entry">
+                      <input
+                        value={couponCode}
+                        onChange={(event) => setCouponCode(event.target.value.toUpperCase())}
+                        placeholder="Digite o código"
+                        maxLength={24}
+                        aria-label="Código do cupom"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void validateCoupon()}
+                        disabled={couponBusy || couponCode.trim().length < 3}
+                      >
+                        {couponBusy ? "Validando…" : "Aplicar"}
+                      </button>
+                    </div>
+                  )}
+                  <div className="payment-selector" aria-label="Forma de pagamento">
+                    <span>
+                      <Wallet /> <b>Forma de pagamento</b>
+                    </span>
+                    <button
+                      type="button"
+                      className={paymentMethod === "pix" ? "active" : ""}
+                      onClick={() => setPaymentMethod("pix")}
+                    >
+                      PIX
+                    </button>
+                    <button
+                      type="button"
+                      className={paymentMethod === "cash" ? "active" : ""}
+                      onClick={() => setPaymentMethod("cash")}
+                    >
+                      Dinheiro
+                    </button>
+                  </div>
+                  <Button
+                    disabled={busy || nearbyDrivers.length === 0}
+                    className="primary-cta progressive-request-cta"
+                    onClick={() => void requestRide()}
+                  >
+                    {busy
+                      ? "AGUARDE…"
+                      : nearbyDrivers.length
+                        ? `PEDIR MOTO • ${money(estimate.fareCents)}`
+                        : "SEM MOTORISTA DISPONÍVEL"}
+                    <ChevronRight />
+                  </Button>
+                </div>
+              )}
+            </div>
+            <div className="address-stack legacy-passenger-controls">
               <AddressField
                 backend={backend}
                 icon={<MapPin />}
@@ -1240,7 +1645,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                 <Crosshair /> {locationStatus}
               </div>
             )}
-            <div className="quick-place-section">
+            <div className="quick-place-section legacy-passenger-controls">
               <div className="quick-place-heading">
                 <b>Pontos rápidos de Ribeira do Pombal</b>
                 <button type="button" onClick={() => setQuickPlacesOpen(true)}>
@@ -1273,7 +1678,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
               )}
             </div>
             {estimate && (
-              <div className="quote-card">
+              <div className="quote-card legacy-passenger-controls">
                 <div className="quote-product">
                   <span>
                     <Bike />
@@ -1307,8 +1712,10 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             )}
             <Button
               disabled={busy}
-              className="primary-cta"
-              onClick={estimate ? requestRide : calculate}
+              className="primary-cta legacy-passenger-controls"
+              onClick={() =>
+                estimate ? void requestRide() : void calculate()
+              }
             >
               {!busy && !estimate && <Calculator />}
               {busy
@@ -1319,7 +1726,10 @@ function PassengerPanel({ backend }: { backend: Backend }) {
               <ChevronRight />
             </Button>
             {stage === "draft" && (
-              <div className="home-shortcuts" aria-label="Atalhos">
+              <div
+                className="home-shortcuts legacy-passenger-controls"
+                aria-label="Atalhos"
+              >
                 <button
                   type="button"
                   onClick={() => openPanel("passenger-history")}
@@ -1628,7 +2038,10 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           <NotificationsPanel backend={backend} id="passenger-notifications" />
         )}
       </section>
-      <nav className="passenger-bottom-nav" aria-label="Navegação principal">
+      <nav
+        className={`passenger-bottom-nav ${["searching", "accepted", "arrived", "riding"].includes(stage) ? "ride-critical" : ""}`}
+        aria-label="Navegação principal"
+      >
         <button
           type="button"
           className={mobileNav === "home" ? "active" : ""}
@@ -1687,6 +2100,133 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           <span>Perfil</span>
         </button>
       </nav>
+      {destinationSearchOpen && (
+        <section
+          className="destination-search-screen"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="destination-search-title"
+        >
+          <header>
+            <button
+              type="button"
+              onClick={() => setDestinationSearchOpen(false)}
+              aria-label="Voltar para o mapa"
+            >
+              <ChevronRight />
+            </button>
+            <h2 id="destination-search-title">Selecionar destino</h2>
+          </header>
+          <div className="destination-search-fields">
+            <AddressField
+              backend={backend}
+              icon={<Crosshair />}
+              label="Origem"
+              value={originAddress}
+              selected={originPoint}
+              onChange={(value) => {
+                setOriginAddress(value);
+                setOriginPoint(null);
+                setEstimate(null);
+              }}
+              onSelect={(result) => {
+                setOriginPoint(result);
+                setOriginAddress(result.address);
+                setEstimate(null);
+                setLocationStatus("Localização encontrada");
+              }}
+              placeholder="Minha localização atual"
+              onUseGps={useCurrentLocation}
+              onOpenMap={() => {
+                setDestinationSearchOpen(false);
+                setMapPicker("origin");
+              }}
+              gpsBusy={gpsBusy}
+              inputId="origin-search-address"
+            />
+            <AddressField
+              backend={backend}
+              icon={<Search />}
+              label="Destino"
+              value={destinationAddress}
+              selected={destinationPoint}
+              onChange={(value) => {
+                setDestinationAddress(value);
+                setDestinationPoint(null);
+                setSelectedQuickPlace(null);
+                setEstimate(null);
+              }}
+              onSelect={(result) =>
+                chooseDestination(
+                  result,
+                  result.approximate
+                    ? "Rua encontrada; ajuste o ponto se necessário"
+                    : "Destino selecionado",
+                )
+              }
+              placeholder="Para onde vamos?"
+              onOpenMap={() => {
+                setDestinationSearchOpen(false);
+                setMapPicker("destination");
+              }}
+              inputId="destination-search-address"
+              accent
+            />
+          </div>
+          {locationStatus && (
+            <div className="destination-search-status" role="status">
+              <Crosshair /> {locationStatus}
+            </div>
+          )}
+          <div className="destination-search-suggestions">
+            <h3>
+              {recentDestinations.length ? "Destinos recentes" : "Pontos conhecidos"}
+            </h3>
+            {recentDestinations.map((item) => (
+              <button
+                type="button"
+                key={`search-${item.id}`}
+                onClick={() =>
+                  chooseDestination(
+                    {
+                      id: `recent-search-${item.id}`,
+                      address: item.destination_address,
+                      shortAddress: item.destination_address.split(",")[0],
+                      lat: item.destination_lat,
+                      lng: item.destination_lng,
+                      city: "Ribeira do Pombal",
+                      state: "BA",
+                      approximate: false,
+                    },
+                    "Destino recente selecionado",
+                  )
+                }
+              >
+                <History />
+                <span>
+                  <b>{item.destination_address.split(",")[0]}</b>
+                  <small>{item.destination_address}</small>
+                </span>
+                <ChevronRight />
+              </button>
+            ))}
+            {featuredQuickPlaces.slice(0, recentDestinations.length ? 3 : 6).map((place) => (
+              <button
+                type="button"
+                key={`known-${place.id}`}
+                onClick={() => chooseQuickPlace(place)}
+              >
+                <QuickPlaceIcon name={place.icon} color={place.color} />
+                <span>
+                  <b>{place.name}</b>
+                  <small>{place.address}</small>
+                </span>
+                <ChevronRight />
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       {quickPlacesOpen && (
         <div
           className="quick-places-overlay"
@@ -1794,10 +2334,9 @@ function PassengerPanel({ backend }: { backend: Backend }) {
               setOriginAddress(result.address);
               setLocationStatus("Localização encontrada");
             } else {
-              setDestinationPoint(result);
-              setDestinationAddress(result.address);
-              setSelectedQuickPlace(null);
-              setNotice("Destino selecionado no mapa.");
+              setMapPicker(null);
+              chooseDestination(result, "Destino selecionado no mapa");
+              return;
             }
             setEstimate(null);
             setMapPicker(null);

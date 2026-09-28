@@ -6,6 +6,10 @@ const headers = {
   "User-Agent": "MotoVIP/1.0 (Ribeira do Pombal passenger app)",
   "Accept-Language": "pt-BR,pt;q=0.9",
 };
+const searchCache = new Map<
+  string,
+  { expiresAt: number; results: AddressResult[] }
+>();
 
 type NominatimResult = {
   place_id: number;
@@ -121,15 +125,23 @@ async function photonSearch(query: string) {
 
 export async function searchAddresses(rawQuery: string) {
   const query = rawQuery.trim().replace(/\s+/g, " ");
+  const cacheKey = query.toLocaleLowerCase("pt-BR");
+  const cached = searchCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.results;
   const localQuery = `${query}, Ribeira do Pombal, Bahia, Brasil`;
-  const [localResults, autocomplete] = await Promise.all([nominatimSearch(localQuery), photonSearch(query)]);
+  const [localResults, autocomplete] = await Promise.all([
+    nominatimSearch(localQuery).catch(() => [] as NominatimResult[]),
+    photonSearch(query),
+  ]);
   let results = localResults;
   let approximate = false;
 
   const numberMatch = query.match(/^(.*?)(?:,|\s)\s*(\d+[A-Za-z]?)\s*$/);
   const hasExactNumber = numberMatch ? results.some((item) => item.address?.house_number?.toLowerCase() === numberMatch[2].toLowerCase()) : true;
   if ((!results.length || !hasExactNumber) && numberMatch?.[1]) {
-    results = await nominatimSearch(`${numberMatch[1].trim()}, Ribeira do Pombal, Bahia, Brasil`);
+    results = await nominatimSearch(
+      `${numberMatch[1].trim()}, Ribeira do Pombal, Bahia, Brasil`,
+    ).catch(() => [] as NominatimResult[]);
     approximate = results.length > 0;
   }
   const mapped = results
@@ -137,11 +149,13 @@ export async function searchAddresses(rawQuery: string) {
     .map((item) => toAddressResult(item, approximate || Boolean(numberMatch && item.address?.house_number?.toLowerCase() !== numberMatch[2].toLowerCase())));
   mapped.push(...autocomplete.map((item) => ({ ...item, approximate: item.approximate || Boolean(numberMatch && !item.address.includes(numberMatch[2])) })));
   if (mapped.length < 3) {
-    const broader = await nominatimSearch(query);
+    const broader = await nominatimSearch(query).catch(
+      () => [] as NominatimResult[],
+    );
     mapped.push(...broader.map((item) => toAddressResult(item, Boolean(numberMatch && item.address?.house_number?.toLowerCase() !== numberMatch[2].toLowerCase()))));
   }
   const seen = new Set<string>();
-  return mapped
+  const finalResults = mapped
     .sort((a, b) => addressScore(b) - addressScore(a))
     .filter((item) => {
       const key = item.shortAddress.toLowerCase();
@@ -150,6 +164,15 @@ export async function searchAddresses(rawQuery: string) {
       return true;
     })
     .slice(0, 8);
+  searchCache.set(cacheKey, {
+    expiresAt: Date.now() + 2 * 60 * 1000,
+    results: finalResults,
+  });
+  if (searchCache.size > 200) {
+    const oldest = searchCache.keys().next().value;
+    if (oldest) searchCache.delete(oldest);
+  }
+  return finalResults;
 }
 
 export async function reverseAddress(lat: number, lng: number) {
