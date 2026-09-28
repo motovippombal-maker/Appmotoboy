@@ -146,7 +146,7 @@ export function AuthPortal({ onSignIn, onSignUp, onReset }: Props) {
             alt="Motociclista da Moto SyXp em Ribeira do Pombal"
             fill
             priority
-            sizes="100vw"
+            sizes="(max-width: 760px) 100vw, 1px"
           />
           <div className="auth-hero-shade" />
           <div className="auth-brand-copy">
