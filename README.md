@@ -23,7 +23,7 @@ Plataforma de mototáxi digital para Ribeira do Pombal/BA. O projeto reúne os f
 - Supabase Auth, Postgres, RLS e Realtime;
 - Leaflet, OpenStreetMap, Nominatim e OSRM;
 - Web Push/VAPID;
-- Cloudflare Workers/Sites.
+- Cloudflare Workers/Sites e Vercel.
 
 ## Requisitos
 
@@ -64,7 +64,10 @@ O ambiente de desenvolvimento abre normalmente em `http://localhost:5173`.
 ```bash
 npm run lint
 npm run build
+npm run build:vercel
 ```
+
+O build padrão mantém a saída Vinext/Cloudflare. Para publicar o Next.js nativo na Vercel, siga [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md).
 
 ## Banco de dados
 

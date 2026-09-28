@@ -7,9 +7,9 @@ export type LivePoint = { lat: number; lng: number; label?: string };
 
 export function RealMap({ origin, destination, driver, nearbyDrivers = [], route }: { origin?: LivePoint; destination?: LivePoint; driver?: LivePoint; nearbyDrivers?: LivePoint[]; route?: Array<[number, number]> }) {
   const elementRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<LeafletMap>();
+  const mapRef = useRef<LeafletMap | null>(null);
   const layersRef = useRef<Array<Marker | Polyline>>([]);
-  const driverMarkerRef = useRef<Marker>();
+  const driverMarkerRef = useRef<Marker | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
@@ -23,7 +23,7 @@ export function RealMap({ origin, destination, driver, nearbyDrivers = [], route
       L.control.zoom({ position: "topright" }).addTo(map);
       mapRef.current = map; setMapReady(true);
     });
-    return () => { disposed = true; driverMarkerRef.current = undefined; mapRef.current?.remove(); mapRef.current = undefined; };
+    return () => { disposed = true; driverMarkerRef.current = null; mapRef.current?.remove(); mapRef.current = null; };
   }, []);
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export function RealMap({ origin, destination, driver, nearbyDrivers = [], route
 
   useEffect(() => {
     const map = mapRef.current; if (!map || !mapReady) return;
-    if (!driver) { driverMarkerRef.current?.remove(); driverMarkerRef.current = undefined; return; }
+    if (!driver) { driverMarkerRef.current?.remove(); driverMarkerRef.current = null; return; }
     void import("leaflet").then((module) => {
       const L = module.default;
       if (driverMarkerRef.current) {

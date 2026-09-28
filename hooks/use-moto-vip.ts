@@ -59,8 +59,13 @@ export function useMotoVip() {
     } catch {
       throw new Error("Conexão interrompida. O estado real será sincronizado ao reconectar.");
     }
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.message || "Não foi possível concluir a operação.");
+    const payload: unknown = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = typeof payload === "object" && payload !== null && "message" in payload && typeof payload.message === "string"
+        ? payload.message
+        : "Não foi possível concluir a operação.";
+      throw new Error(message);
+    }
     return payload as T;
   }, [supabase]);
 

@@ -1,0 +1,16 @@
+.env
+.env.*
+.next
+.vinext
+dist
+node_modules
+.vercel
+.wrangler
+.sites-runtime
+.npm-cache
+.agents
+.codex
+.codex-verification
+supabase/.temp
+outputs
+work
