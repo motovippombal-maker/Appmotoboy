@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Moto SyXp">
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#02060c"/><stop offset="1" stop-color="#0b1f37"/></linearGradient><linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffe45a"/><stop offset=".48" stop-color="#ffc400"/><stop offset="1" stop-color="#ed9500"/></linearGradient></defs>
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/><rect x="35" y="35" width="442" height="442" rx="91" fill="none" stroke="url(#gold)" stroke-width="25"/>
+  <circle cx="150" cy="350" r="68" fill="none" stroke="#f8fbff" stroke-width="28"/><circle cx="385" cy="350" r="68" fill="none" stroke="#f8fbff" stroke-width="28"/>
+  <path d="m150 350 62-113h76l52 113M212 266l84 84m-84-113-39-45m115 45 37-58h51" fill="none" stroke="#f8fbff" stroke-width="25" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="267" cy="143" r="35" fill="#f8fbff"/><path d="m255 190 50 53 54 13m-104-66-52 54" fill="none" stroke="url(#gold)" stroke-width="31" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,20 +1,35 @@
 {
   "id": "/",
-  "name": "Moto VIP",
-  "short_name": "Moto VIP",
-  "description": "Mototáxi digital em Ribeira do Pombal",
+  "name": "Moto SyXp",
+  "short_name": "SyXp",
+  "description": "Mobilidade rápida e segura em Ribeira do Pombal, by GoSyXP",
   "lang": "pt-BR",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "orientation": "portrait-primary",
-  "background_color": "#f4f7fb",
-  "theme_color": "#071c39",
+  "background_color": "#05090f",
+  "theme_color": "#05090f",
   "categories": ["travel", "navigation", "business"],
   "icons": [
-    { "src": "/icons/moto-vip-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/moto-vip-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/moto-vip-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "/icons/moto-syxp-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/moto-syxp-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/moto-syxp-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }

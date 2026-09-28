@@ -90,7 +90,7 @@ function money(cents = 0) {
 function minutes(seconds = 0) {
   return Math.max(1, Math.round(seconds / 60));
 }
-function initials(name = "Moto VIP") {
+function initials(name = "Moto SyXp") {
   return name
     .split(/\s+/)
     .slice(0, 2)
@@ -161,11 +161,14 @@ const QUICK_PLACE_ICONS = [
   { value: "sports", label: "Campo/quadra", icon: Trophy },
   { value: "gym", label: "Academia", icon: Dumbbell },
   { value: "store", label: "Loja", icon: Store },
-  { value: "bike", label: "Moto VIP", icon: Bike },
+  { value: "bike", label: "Moto SyXp", icon: Bike },
   { value: "pin", label: "Local genérico", icon: MapPin },
 ] as const;
 
-const QUICK_PLACE_CATEGORIES: Array<{ value: QuickPlace["category"] | "all"; label: string }> = [
+const QUICK_PLACE_CATEGORIES: Array<{
+  value: QuickPlace["category"] | "all";
+  label: string;
+}> = [
   { value: "all", label: "Todos" },
   { value: "hospital", label: "Saúde" },
   { value: "education", label: "Educação" },
@@ -183,19 +186,30 @@ const QUICK_PLACE_CATEGORIES: Array<{ value: QuickPlace["category"] | "all"; lab
   { value: "sports", label: "Esportes" },
   { value: "gym", label: "Academias" },
   { value: "store", label: "Lojas" },
-  { value: "moto_vip", label: "Moto VIP" },
+  { value: "moto_vip", label: "Moto SyXp" },
   { value: "generic", label: "Outros" },
 ];
 
-function QuickPlaceIcon({ name, color }: { name: QuickPlace["icon"]; color?: string }) {
-  const entry = QUICK_PLACE_ICONS.find((item) => item.value === name) || QUICK_PLACE_ICONS.at(-1)!;
+function QuickPlaceIcon({
+  name,
+  color,
+}: {
+  name: QuickPlace["icon"];
+  color?: string;
+}) {
+  const entry =
+    QUICK_PLACE_ICONS.find((item) => item.value === name) ||
+    QUICK_PLACE_ICONS.at(-1)!;
   const Icon = entry.icon;
   return <Icon style={color ? { color } : undefined} aria-hidden="true" />;
 }
 
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
-    <div className={`brand-lockup ${compact ? "compact" : ""}`} aria-label="GoSyXP · Moto VIP">
+    <div
+      className={`brand-lockup ${compact ? "compact" : ""}`}
+      aria-label="GoSyXP · Moto SyXp"
+    >
       <Image
         className="brand-logo-image"
         src="/gosyxp-logo.png"
@@ -204,6 +218,9 @@ function Brand({ compact = false }: { compact?: boolean }) {
         height={107}
         priority
       />
+      <span className="brand-service-name">
+        Moto <b>SyXp</b>
+      </span>
     </div>
   );
 }
@@ -232,18 +249,16 @@ function PasswordRecovery({ backend }: { backend: Backend }) {
     const result = await backend.updatePassword(password);
     setMessage(
       result.error?.message ||
-        "Senha atualizada. Você já pode continuar no Moto VIP.",
+        "Senha atualizada. Você já pode continuar no Moto SyXp.",
     );
     setBusy(false);
   }
   return (
     <main className="auth-page">
       <section className="auth-brand">
-        <div className="auth-logo">
-          <Bike />
-        </div>
+        <Brand />
         <span>
-          MOTO <b>VIP</b>
+          MOTO <b>SyXp</b>
         </span>
         <p>Mobilidade rápida e segura em Ribeira do Pombal.</p>
       </section>
@@ -348,9 +363,14 @@ function MapCanvas({
         route={route}
       />
       {!admin && (
-        <div className={`connection-pill ${connected ? "online" : "offline"}`} role="status">
+        <div
+          className={`connection-pill ${connected ? "online" : "offline"}`}
+          role="status"
+        >
           {connected ? <Wifi /> : <WifiOff />}
-          <span>{connected ? "Conectado ao Moto VIP" : "Reconectando ao Moto VIP"}</span>
+          <span>
+            {connected ? "Conectado ao Moto SyXp" : "Reconectando ao Moto SyXp"}
+          </span>
         </div>
       )}
       <div className="map-tools">
@@ -361,7 +381,9 @@ function MapCanvas({
         >
           <Crosshair />
         </button>
-        <span className="map-provider"><Layers /> OPENSTREETMAP · MAPA REAL</span>
+        <span className="map-provider">
+          <Layers /> OPENSTREETMAP · MAPA REAL
+        </span>
       </div>
     </div>
   );
@@ -408,18 +430,31 @@ function AddressField({
     const timer = window.setTimeout(() => {
       setSearching(true);
       setSearchError("");
-      void backend.searchAddresses(query).then(({ results }) => {
-        if (!current) return;
-        setSuggestions(results);
-        setSearching(false);
-        if (!results.length) setSearchError("Nenhum endereço encontrado. Você pode escolher o ponto no mapa.");
-      }).catch((error: unknown) => {
-        if (!current) return;
-        setSearching(false);
-        setSearchError(error instanceof Error ? error.message : "Não foi possível buscar endereços.");
-      });
+      void backend
+        .searchAddresses(query)
+        .then(({ results }) => {
+          if (!current) return;
+          setSuggestions(results);
+          setSearching(false);
+          if (!results.length)
+            setSearchError(
+              "Nenhum endereço encontrado. Você pode escolher o ponto no mapa.",
+            );
+        })
+        .catch((error: unknown) => {
+          if (!current) return;
+          setSearching(false);
+          setSearchError(
+            error instanceof Error
+              ? error.message
+              : "Não foi possível buscar endereços.",
+          );
+        });
     }, 450);
-    return () => { current = false; window.clearTimeout(timer); };
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
   }, [backend, focused, selected, value]);
 
   return (
@@ -436,39 +471,94 @@ function AddressField({
             placeholder={placeholder}
             onFocus={() => setFocused(true)}
             onBlur={() => window.setTimeout(() => setFocused(false), 180)}
-            onChange={(event) => { setSuggestions([]); setSearchError(""); setSearching(event.target.value.trim().length >= 3); onChange(event.target.value); }}
+            onChange={(event) => {
+              setSuggestions([]);
+              setSearchError("");
+              setSearching(event.target.value.trim().length >= 3);
+              onChange(event.target.value);
+            }}
             aria-label={label}
             role="combobox"
             aria-autocomplete="list"
-            aria-expanded={focused && (suggestions.length > 0 || Boolean(searchError))}
+            aria-expanded={
+              focused && (suggestions.length > 0 || Boolean(searchError))
+            }
             aria-controls={`${inputId}-suggestions`}
           />
         </span>
         <span className="field-actions">
           {onUseGps && (
-            <button type="button" className="field-action" onClick={onUseGps} aria-label="Usar localização atual" disabled={gpsBusy}>
+            <button
+              type="button"
+              className="field-action"
+              onClick={onUseGps}
+              aria-label="Usar localização atual"
+              disabled={gpsBusy}
+            >
               <Crosshair className={gpsBusy ? "is-spinning" : ""} />
             </button>
           )}
-          <button type="button" className="field-action" onClick={onOpenMap} aria-label={`Escolher ${label.toLowerCase()} no mapa`}>
+          <button
+            type="button"
+            className="field-action"
+            onClick={onOpenMap}
+            aria-label={`Escolher ${label.toLowerCase()} no mapa`}
+          >
             <MapPin />
           </button>
         </span>
       </label>
       {focused && !selected && value.trim().length >= 3 && (
-        <div id={`${inputId}-suggestions`} className="address-suggestions" role="listbox" aria-label={`Sugestões para ${label}`}>
-          {searching && <div className="address-search-state"><Search className="is-spinning" /> Buscando endereços…</div>}
-          {!searching && suggestions.map((result) => (
-            <button key={result.id} type="button" role="option" aria-selected="false" onMouseDown={(event) => event.preventDefault()} onClick={() => { onSelect(result); setFocused(false); }}>
-              <MapPin />
-              <span><b>{result.shortAddress}</b><small>{result.approximate ? "Número aproximado — ajuste o ponto no mapa se necessário" : result.address}</small></span>
-              <ChevronRight />
-            </button>
-          ))}
-          {!searching && searchError && <div className="address-search-state error">{searchError}</div>}
-          {!searching && (searchError || suggestions.some((item) => item.approximate)) && (
-            <button type="button" className="address-map-option" onMouseDown={(event) => event.preventDefault()} onClick={onOpenMap}><Layers /> Escolher ou ajustar no mapa</button>
+        <div
+          id={`${inputId}-suggestions`}
+          className="address-suggestions"
+          role="listbox"
+          aria-label={`Sugestões para ${label}`}
+        >
+          {searching && (
+            <div className="address-search-state">
+              <Search className="is-spinning" /> Buscando endereços…
+            </div>
           )}
+          {!searching &&
+            suggestions.map((result) => (
+              <button
+                key={result.id}
+                type="button"
+                role="option"
+                aria-selected="false"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onSelect(result);
+                  setFocused(false);
+                }}
+              >
+                <MapPin />
+                <span>
+                  <b>{result.shortAddress}</b>
+                  <small>
+                    {result.approximate
+                      ? "Número aproximado — ajuste o ponto no mapa se necessário"
+                      : result.address}
+                  </small>
+                </span>
+                <ChevronRight />
+              </button>
+            ))}
+          {!searching && searchError && (
+            <div className="address-search-state error">{searchError}</div>
+          )}
+          {!searching &&
+            (searchError || suggestions.some((item) => item.approximate)) && (
+              <button
+                type="button"
+                className="address-map-option"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onOpenMap}
+              >
+                <Layers /> Escolher ou ajustar no mapa
+              </button>
+            )}
         </div>
       )}
     </div>
@@ -488,7 +578,13 @@ function MapAddressPicker({
   onClose: () => void;
   onConfirm: (result: AddressResult) => void;
 }) {
-  const [point, setPoint] = useState<LivePoint>(initial || { lat: -10.8373, lng: -38.5357, label: "Centro de Ribeira do Pombal" });
+  const [point, setPoint] = useState<LivePoint>(
+    initial || {
+      lat: -10.8373,
+      lng: -38.5357,
+      label: "Centro de Ribeira do Pombal",
+    },
+  );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -499,28 +595,57 @@ function MapAddressPicker({
       const result = await backend.reverseAddress(point.lat, point.lng);
       onConfirm(result);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Não foi possível identificar esse ponto.");
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível identificar esse ponto.",
+      );
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="map-picker-overlay" role="dialog" aria-modal="true" aria-labelledby="map-picker-title">
+    <div
+      className="map-picker-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="map-picker-title"
+    >
       <div className="map-picker-sheet">
         <header>
-          <div><small>SELEÇÃO MANUAL</small><h2 id="map-picker-title">Escolher {kind === "origin" ? "origem" : "destino"} no mapa</h2></div>
-          <button type="button" onClick={onClose} aria-label="Fechar mapa"><X /></button>
+          <div>
+            <small>SELEÇÃO MANUAL</small>
+            <h2 id="map-picker-title">
+              Escolher {kind === "origin" ? "origem" : "destino"} no mapa
+            </h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Fechar mapa">
+            <X />
+          </button>
         </header>
-        <p>Clique no mapa ou arraste o marcador até o ponto exato. Depois confirme o endereço.</p>
+        <p>
+          Clique no mapa ou arraste o marcador até o ponto exato. Depois
+          confirme o endereço.
+        </p>
         <div className="map-picker-canvas">
           <RealMap pickPoint={point} onPick={setPoint} />
         </div>
-        <div className="map-picker-coordinates"><MapPin /> {point.lat.toFixed(6)}, {point.lng.toFixed(6)}</div>
-        {message && <div className="map-picker-message" role="status">{message}</div>}
+        <div className="map-picker-coordinates">
+          <MapPin /> {point.lat.toFixed(6)}, {point.lng.toFixed(6)}
+        </div>
+        {message && (
+          <div className="map-picker-message" role="status">
+            {message}
+          </div>
+        )}
         <div className="map-picker-actions">
-          <button type="button" onClick={onClose}>Cancelar</button>
-          <button type="button" onClick={confirm} disabled={busy}><Check /> {busy ? "Confirmando…" : "Confirmar este ponto"}</button>
+          <button type="button" onClick={onClose}>
+            Cancelar
+          </button>
+          <button type="button" onClick={confirm} disabled={busy}>
+            <Check /> {busy ? "Confirmando…" : "Confirmar este ponto"}
+          </button>
         </div>
       </div>
     </div>
@@ -542,8 +667,7 @@ function gpsPosition() {
 }
 
 function geolocationMessage(error: GeolocationPositionError) {
-  if (error.code === 1)
-    return "Permissão de localização negada";
+  if (error.code === 1) return "Permissão de localização negada";
   if (error.code === 2)
     return "Não foi possível obter sua localização. Verifique se o GPS está ativado.";
   if (error.code === 3)
@@ -562,7 +686,13 @@ function rideStage(ride: Ride | null, hasEstimate: boolean) {
   return "draft";
 }
 
-function NotificationsPanel({ backend, id }: { backend: Backend; id?: string }) {
+function NotificationsPanel({
+  backend,
+  id,
+}: {
+  backend: Backend;
+  id?: string;
+}) {
   const [pushMessage, setPushMessage] = useState("");
   async function enablePush() {
     setPushMessage("");
@@ -630,20 +760,29 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   const [originAddress, setOriginAddress] = useState("");
   const [destinationAddress, setDestinationAddress] = useState("");
   const [originPoint, setOriginPoint] = useState<AddressResult | null>(null);
-  const [destinationPoint, setDestinationPoint] = useState<AddressResult | null>(null);
+  const [destinationPoint, setDestinationPoint] =
+    useState<AddressResult | null>(null);
   const [locationStatus, setLocationStatus] = useState("");
   const [gpsBusy, setGpsBusy] = useState(false);
-  const [mapPicker, setMapPicker] = useState<"origin" | "destination" | null>(null);
+  const [mapPicker, setMapPicker] = useState<"origin" | "destination" | null>(
+    null,
+  );
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [nearbyDrivers, setNearbyDrivers] = useState<NearbyDriver[]>([]);
   const [ratingScore, setRatingScore] = useState(5);
   const [ratingComment, setRatingComment] = useState("");
-  const [selectedQuickPlace, setSelectedQuickPlace] = useState<QuickPlace | null>(null);
+  const [selectedQuickPlace, setSelectedQuickPlace] =
+    useState<QuickPlace | null>(null);
   const [quickPlacesOpen, setQuickPlacesOpen] = useState(false);
   const [quickPlaceSearch, setQuickPlaceSearch] = useState("");
-  const [quickPlaceCategory, setQuickPlaceCategory] = useState<QuickPlace["category"] | "all">("all");
+  const [quickPlaceCategory, setQuickPlaceCategory] = useState<
+    QuickPlace["category"] | "all"
+  >("all");
+  const [mobileNav, setMobileNav] = useState<
+    "home" | "rides" | "coupons" | "wallet" | "profile"
+  >("home");
   const [isOnline, setIsOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine,
   );
@@ -671,7 +810,11 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           label: estimate.origin.address,
         }
       : originPoint
-        ? { lat: originPoint.lat, lng: originPoint.lng, label: originPoint.shortAddress }
+        ? {
+            lat: originPoint.lat,
+            lng: originPoint.lng,
+            label: originPoint.shortAddress,
+          }
         : undefined;
   const destination = ride
     ? {
@@ -686,9 +829,13 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           label: estimate.destination.address,
         }
       : destinationPoint
-        ? { lat: destinationPoint.lat, lng: destinationPoint.lng, label: destinationPoint.shortAddress }
+        ? {
+            lat: destinationPoint.lat,
+            lng: destinationPoint.lng,
+            label: destinationPoint.shortAddress,
+          }
         : undefined;
-  const driverName = ride?.driver?.profiles?.full_name || "Seu Moto VIP";
+  const driverName = ride?.driver?.profiles?.full_name || "Seu Moto SyXp";
   const vehicle = ride?.driver?.vehicles?.[0];
   const driverDistance =
     ride && backend.driverLocation
@@ -704,18 +851,29 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   const payment = completedEntry?.payment;
   const rating = completedEntry?.rating;
   const quickPlaces = backend.quickPlaces || [];
-  const featuredQuickPlaces = quickPlaces.filter((place) => place.active && place.featured).slice(0, 6);
+  const featuredQuickPlaces = quickPlaces
+    .filter((place) => place.active && place.featured)
+    .slice(0, 6);
   const visibleQuickPlaces = quickPlaces.filter((place) => {
     if (!place.active) return false;
-    if (quickPlaceCategory !== "all" && place.category !== quickPlaceCategory) return false;
+    if (quickPlaceCategory !== "all" && place.category !== quickPlaceCategory)
+      return false;
     const search = quickPlaceSearch.trim().toLocaleLowerCase("pt-BR");
-    return !search || `${place.name} ${place.address}`.toLocaleLowerCase("pt-BR").includes(search);
+    return (
+      !search ||
+      `${place.name} ${place.address}`
+        .toLocaleLowerCase("pt-BR")
+        .includes(search)
+    );
   });
 
   async function locateDevice() {
     setLocationStatus("Obtendo sua localização…");
     const position = await gpsPosition();
-    const result = await backend.reverseAddress(position.coords.latitude, position.coords.longitude);
+    const result = await backend.reverseAddress(
+      position.coords.latitude,
+      position.coords.longitude,
+    );
     await backend.updateLocation(position).catch(() => undefined);
     return result;
   }
@@ -731,7 +889,10 @@ function PassengerPanel({ backend }: { backend: Backend }) {
       setLocationStatus("Localização encontrada");
       setNotice("Localização encontrada");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Não foi possível obter sua localização";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Não foi possível obter sua localização";
       setLocationStatus(message);
       setNotice(message);
     } finally {
@@ -742,11 +903,24 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   function chooseQuickPlace(place: QuickPlace) {
     setSelectedQuickPlace(place);
     setDestinationAddress(place.address);
-    setDestinationPoint({ id: place.id, address: place.address, shortAddress: place.name, lat: place.latitude, lng: place.longitude, city: "Ribeira do Pombal", state: "BA", approximate: false });
+    setDestinationPoint({
+      id: place.id,
+      address: place.address,
+      shortAddress: place.name,
+      lat: place.latitude,
+      lng: place.longitude,
+      city: "Ribeira do Pombal",
+      state: "BA",
+      approximate: false,
+    });
     setEstimate(null);
     setQuickPlacesOpen(false);
-    setNotice(`${place.name} definido como destino. Toque em “Ver valor da corrida” para calcular a rota.`);
-    requestAnimationFrame(() => document.getElementById("destination-address")?.focus());
+    setNotice(
+      `${place.name} definido como destino. Toque em “Ver valor da corrida” para calcular a rota.`,
+    );
+    requestAnimationFrame(() =>
+      document.getElementById("destination-address")?.focus(),
+    );
   }
 
   function openPanel(id: string) {
@@ -774,20 +948,53 @@ function PassengerPanel({ backend }: { backend: Backend }) {
       }
       const result = await backend.estimateRide({
         origin: resolvedOrigin
-          ? { address: resolvedOrigin.address, lat: resolvedOrigin.lat, lng: resolvedOrigin.lng }
+          ? {
+              address: resolvedOrigin.address,
+              lat: resolvedOrigin.lat,
+              lng: resolvedOrigin.lng,
+            }
           : { address: originAddress },
         destination: destinationPoint
-          ? { address: destinationPoint.address, lat: destinationPoint.lat, lng: destinationPoint.lng }
+          ? {
+              address: destinationPoint.address,
+              lat: destinationPoint.lat,
+              lng: destinationPoint.lng,
+            }
           : selectedQuickPlace
-            ? { address: selectedQuickPlace.address, lat: selectedQuickPlace.latitude, lng: selectedQuickPlace.longitude }
+            ? {
+                address: selectedQuickPlace.address,
+                lat: selectedQuickPlace.latitude,
+                lng: selectedQuickPlace.longitude,
+              }
             : { address: destinationAddress },
       });
       const nearby = await backend.findNearbyDrivers(result.origin);
       setEstimate(result);
       setOriginAddress(result.origin.address);
       setDestinationAddress(result.destination.address);
-      setOriginPoint({ id: "estimated-origin", address: result.origin.address, shortAddress: result.origin.address.split(",").slice(0, 3).join(","), lat: result.origin.lat, lng: result.origin.lng, city: "", state: "", approximate: false });
-      setDestinationPoint({ id: "estimated-destination", address: result.destination.address, shortAddress: result.destination.address.split(",").slice(0, 3).join(","), lat: result.destination.lat, lng: result.destination.lng, city: "", state: "", approximate: false });
+      setOriginPoint({
+        id: "estimated-origin",
+        address: result.origin.address,
+        shortAddress: result.origin.address.split(",").slice(0, 3).join(","),
+        lat: result.origin.lat,
+        lng: result.origin.lng,
+        city: "",
+        state: "",
+        approximate: false,
+      });
+      setDestinationPoint({
+        id: "estimated-destination",
+        address: result.destination.address,
+        shortAddress: result.destination.address
+          .split(",")
+          .slice(0, 3)
+          .join(","),
+        lat: result.destination.lat,
+        lng: result.destination.lng,
+        city: "",
+        state: "",
+        approximate: false,
+      });
       setNearbyDrivers(nearby.drivers);
       setNotice(
         nearby.drivers.length
@@ -898,7 +1105,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
         : stage === "searching"
           ? [
               "Solicitação enviada",
-              "Procurando um Moto VIP próximo…",
+              "Procurando um Moto SyXp próximo…",
               "Motoristas online da região receberam sua solicitação.",
             ]
           : stage === "accepted"
@@ -910,14 +1117,14 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             : stage === "arrived"
               ? [
                   "Ele chegou",
-                  "Seu Moto VIP está esperando",
+                  "Seu Moto SyXp está esperando",
                   "Encontre o motorista no ponto de embarque.",
                 ]
               : stage === "finished"
                 ? [
                     "Viagem concluída",
                     "Corrida finalizada",
-                    "Resumo calculado e registrado pelo Moto VIP.",
+                    "Resumo calculado e registrado pelo Moto SyXp.",
                   ]
                 : [
                     "Corrida em andamento",
@@ -954,7 +1161,9 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             <p>{status[2]}</p>
           </div>
           {stage === "draft" && (
-            <div className="rider-watermark" aria-hidden="true"><Bike /></div>
+            <div className="rider-watermark" aria-hidden="true">
+              <Bike />
+            </div>
           )}
           {stage === "searching" && (
             <span className="search-pulse">
@@ -976,8 +1185,18 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                 label="Onde você está?"
                 value={originAddress}
                 selected={originPoint}
-                onChange={(value) => { setOriginAddress(value); setOriginPoint(null); setEstimate(null); setLocationStatus(""); }}
-                onSelect={(result) => { setOriginPoint(result); setOriginAddress(result.address); setEstimate(null); setLocationStatus("Localização encontrada"); }}
+                onChange={(value) => {
+                  setOriginAddress(value);
+                  setOriginPoint(null);
+                  setEstimate(null);
+                  setLocationStatus("");
+                }}
+                onSelect={(result) => {
+                  setOriginPoint(result);
+                  setOriginAddress(result.address);
+                  setEstimate(null);
+                  setLocationStatus("Localização encontrada");
+                }}
                 placeholder="Digite o endereço ou use o GPS"
                 onUseGps={useCurrentLocation}
                 onOpenMap={() => setMapPicker("origin")}
@@ -1001,7 +1220,11 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                   setDestinationAddress(result.address);
                   setSelectedQuickPlace(null);
                   setEstimate(null);
-                  setNotice(result.approximate ? "Rua encontrada. Confirme ou ajuste o ponto no mapa." : "Destino selecionado.");
+                  setNotice(
+                    result.approximate
+                      ? "Rua encontrada. Confirme ou ajuste o ponto no mapa."
+                      : "Destino selecionado.",
+                  );
                 }}
                 placeholder="Digite um endereço ou selecione um ponto"
                 onOpenMap={() => setMapPicker("destination")}
@@ -1009,14 +1232,25 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                 accent
               />
             </div>
-            {locationStatus && <div className={`location-feedback ${locationStatus === "Localização encontrada" ? "success" : ""}`} role="status"><Crosshair /> {locationStatus}</div>}
+            {locationStatus && (
+              <div
+                className={`location-feedback ${locationStatus === "Localização encontrada" ? "success" : ""}`}
+                role="status"
+              >
+                <Crosshair /> {locationStatus}
+              </div>
+            )}
             <div className="quick-place-section">
               <div className="quick-place-heading">
                 <b>Pontos rápidos de Ribeira do Pombal</b>
-                <button type="button" onClick={() => setQuickPlacesOpen(true)}>Ver mais <ChevronRight /></button>
+                <button type="button" onClick={() => setQuickPlacesOpen(true)}>
+                  Ver mais <ChevronRight />
+                </button>
               </div>
               {backend.quickPlacesLoading ? (
-                <div className="quick-place-state">Carregando pontos rápidos…</div>
+                <div className="quick-place-state">
+                  Carregando pontos rápidos…
+                </div>
               ) : featuredQuickPlaces.length ? (
                 <div className="quick-places" aria-label="Destinos rápidos">
                   {featuredQuickPlaces.map((place) => (
@@ -1080,20 +1314,48 @@ function PassengerPanel({ backend }: { backend: Backend }) {
               {busy
                 ? "AGUARDE…"
                 : estimate
-                  ? "CHAMAR MOTO VIP"
+                  ? "PEDIR MOTO"
                   : "VER VALOR DA CORRIDA"}
               <ChevronRight />
             </Button>
             {stage === "draft" && (
               <div className="home-shortcuts" aria-label="Atalhos">
-                <button type="button" onClick={() => openPanel("passenger-history")}>
-                  <History /><span><b>Minhas corridas</b><small>Ver histórico</small></span><ChevronRight />
+                <button
+                  type="button"
+                  onClick={() => openPanel("passenger-history")}
+                >
+                  <History />
+                  <span>
+                    <b>Minhas corridas</b>
+                    <small>Ver histórico</small>
+                  </span>
+                  <ChevronRight />
                 </button>
-                <button type="button" onClick={() => openPanel("passenger-notifications")}>
-                  <Bell /><span><b>Notificações</b><small>Novidades</small></span><ChevronRight />
+                <button
+                  type="button"
+                  onClick={() => openPanel("passenger-notifications")}
+                >
+                  <Bell />
+                  <span>
+                    <b>Notificações</b>
+                    <small>Novidades</small>
+                  </span>
+                  <ChevronRight />
                 </button>
-                <button type="button" onClick={() => setNotice("Perfil e suporte estão disponíveis no menu da conta.")}>
-                  <Settings2 /><span><b>Mais opções</b><small>Perfil e suporte</small></span><ChevronRight />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setNotice(
+                      "Perfil e suporte estão disponíveis no menu da conta.",
+                    )
+                  }
+                >
+                  <Settings2 />
+                  <span>
+                    <b>Mais opções</b>
+                    <small>Perfil e suporte</small>
+                  </span>
+                  <ChevronRight />
                 </button>
               </div>
             )}
@@ -1362,50 +1624,159 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             </div>
           </details>
         )}
-        {stage === "draft" && <NotificationsPanel backend={backend} id="passenger-notifications" />}
+        {stage === "draft" && (
+          <NotificationsPanel backend={backend} id="passenger-notifications" />
+        )}
       </section>
       <nav className="passenger-bottom-nav" aria-label="Navegação principal">
-        <button type="button" className="active" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
-          <HomeIcon /><span>Início</span>
+        <button
+          type="button"
+          className={mobileNav === "home" ? "active" : ""}
+          onClick={() => {
+            setMobileNav("home");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        >
+          <HomeIcon />
+          <span>Início</span>
         </button>
-        <button type="button" onClick={() => document.getElementById("destination-address")?.focus()}>
-          <Bike /><span>Pedir corrida</span>
+        <button
+          type="button"
+          className={mobileNav === "rides" ? "active" : ""}
+          onClick={() => {
+            setMobileNav("rides");
+            openPanel("passenger-history");
+          }}
+        >
+          <History />
+          <span>Corridas</span>
         </button>
-        <button type="button" onClick={() => setNotice("Nenhum cupom disponível no momento.")}>
-          <Ticket /><span>Cupons</span>
+        <button
+          type="button"
+          className={mobileNav === "coupons" ? "active" : ""}
+          onClick={() => {
+            setMobileNav("coupons");
+            setNotice("Nenhum cupom disponível no momento.");
+          }}
+        >
+          <Ticket />
+          <span>Cupons</span>
         </button>
-        <button type="button" onClick={() => setNotice("Use o menu da conta no topo para acessar seu perfil.")}>
-          <UserRound /><span>Conta</span>
+        <button
+          type="button"
+          className={mobileNav === "wallet" ? "active" : ""}
+          onClick={() => {
+            setMobileNav("wallet");
+            setNotice(
+              "Carteira e formas de pagamento estarão disponíveis aqui.",
+            );
+          }}
+        >
+          <Wallet />
+          <span>Carteira</span>
+        </button>
+        <button
+          type="button"
+          className={mobileNav === "profile" ? "active" : ""}
+          onClick={() => {
+            setMobileNav("profile");
+            setNotice("Use o menu da conta no topo para acessar seu perfil.");
+          }}
+        >
+          <UserRound />
+          <span>Perfil</span>
         </button>
       </nav>
       {quickPlacesOpen && (
-        <div className="quick-places-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setQuickPlacesOpen(false)}>
-          <section className="quick-places-sheet" role="dialog" aria-modal="true" aria-labelledby="quick-places-title">
+        <div
+          className="quick-places-overlay"
+          role="presentation"
+          onMouseDown={(event) =>
+            event.target === event.currentTarget && setQuickPlacesOpen(false)
+          }
+        >
+          <section
+            className="quick-places-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="quick-places-title"
+          >
             <div className="quick-places-sheet-handle" />
             <header>
-              <div><span>DESTINOS DA CIDADE</span><h2 id="quick-places-title">Todos os pontos rápidos</h2></div>
-              <button type="button" onClick={() => setQuickPlacesOpen(false)} aria-label="Fechar pontos rápidos"><X /></button>
+              <div>
+                <span>DESTINOS DA CIDADE</span>
+                <h2 id="quick-places-title">Todos os pontos rápidos</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuickPlacesOpen(false)}
+                aria-label="Fechar pontos rápidos"
+              >
+                <X />
+              </button>
             </header>
             <label className="quick-place-search">
               <Search />
-              <input value={quickPlaceSearch} onChange={(event) => setQuickPlaceSearch(event.target.value)} placeholder="Buscar um local" autoFocus />
+              <input
+                value={quickPlaceSearch}
+                onChange={(event) => setQuickPlaceSearch(event.target.value)}
+                placeholder="Buscar um local"
+                autoFocus
+              />
             </label>
-            <div className="quick-place-filters" aria-label="Filtrar por categoria">
-              {QUICK_PLACE_CATEGORIES.filter((category) => category.value === "all" || quickPlaces.some((place) => place.active && place.category === category.value)).map((category) => (
-                <button type="button" key={category.value} className={quickPlaceCategory === category.value ? "active" : ""} onClick={() => setQuickPlaceCategory(category.value)}>{category.label}</button>
+            <div
+              className="quick-place-filters"
+              aria-label="Filtrar por categoria"
+            >
+              {QUICK_PLACE_CATEGORIES.filter(
+                (category) =>
+                  category.value === "all" ||
+                  quickPlaces.some(
+                    (place) =>
+                      place.active && place.category === category.value,
+                  ),
+              ).map((category) => (
+                <button
+                  type="button"
+                  key={category.value}
+                  className={
+                    quickPlaceCategory === category.value ? "active" : ""
+                  }
+                  onClick={() => setQuickPlaceCategory(category.value)}
+                >
+                  {category.label}
+                </button>
               ))}
             </div>
             <div className="quick-place-catalog">
               {backend.quickPlacesLoading ? (
-                <div className="quick-place-catalog-empty">Carregando pontos rápidos…</div>
-              ) : visibleQuickPlaces.length ? visibleQuickPlaces.map((place) => (
-                <button type="button" key={place.id} onClick={() => chooseQuickPlace(place)}>
-                  <span className="catalog-place-icon" style={{ backgroundColor: `${place.color}18` }}><QuickPlaceIcon name={place.icon} color={place.color} /></span>
-                  <span><b>{place.name}</b><small>{place.address}</small></span>
-                  <ChevronRight />
-                </button>
-              )) : (
-                <div className="quick-place-catalog-empty">{backend.quickPlacesError || "Nenhum ponto rápido disponível"}</div>
+                <div className="quick-place-catalog-empty">
+                  Carregando pontos rápidos…
+                </div>
+              ) : visibleQuickPlaces.length ? (
+                visibleQuickPlaces.map((place) => (
+                  <button
+                    type="button"
+                    key={place.id}
+                    onClick={() => chooseQuickPlace(place)}
+                  >
+                    <span
+                      className="catalog-place-icon"
+                      style={{ backgroundColor: `${place.color}18` }}
+                    >
+                      <QuickPlaceIcon name={place.icon} color={place.color} />
+                    </span>
+                    <span>
+                      <b>{place.name}</b>
+                      <small>{place.address}</small>
+                    </span>
+                    <ChevronRight />
+                  </button>
+                ))
+              ) : (
+                <div className="quick-place-catalog-empty">
+                  {backend.quickPlacesError || "Nenhum ponto rápido disponível"}
+                </div>
               )}
             </div>
           </section>
@@ -1687,7 +2058,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
             )}
           </div>
           <div>
-            <b>Olá, {backend.profile?.full_name || "motoboy"}</b>
+            <b>Olá, {backend.profile?.full_name || "motorista"}</b>
             <small>
               {vehicle
                 ? `${vehicle.brand} ${vehicle.model} · ${vehicle.plate}`
@@ -2071,7 +2442,9 @@ function AdminPanel({ backend }: { backend: Backend }) {
   const [quickPlaceForm, setQuickPlaceForm] = useState(emptyQuickPlaceForm);
   const [quickPlaceOrder, setQuickPlaceOrder] = useState<string[] | null>(null);
   const orderedQuickPlaces = quickPlaceOrder
-    ? quickPlaceOrder.map((id) => backend.quickPlaces.find((place) => place.id === id)).filter((place): place is QuickPlace => Boolean(place))
+    ? quickPlaceOrder
+        .map((id) => backend.quickPlaces.find((place) => place.id === id))
+        .filter((place): place is QuickPlace => Boolean(place))
     : backend.quickPlaces;
   const [draggedPlaceId, setDraggedPlaceId] = useState("");
   const [fareForm, setFareForm] = useState(() => {
@@ -2183,7 +2556,11 @@ function AdminPanel({ backend }: { backend: Backend }) {
       }));
       setNotice("Endereço localizado. Confira as coordenadas e salve o ponto.");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Não foi possível localizar o endereço.");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível localizar o endereço.",
+      );
     } finally {
       setBusyId("");
     }
@@ -2202,7 +2579,9 @@ function AdminPanel({ backend }: { backend: Backend }) {
       featured: place.featured,
       sortOrder: String(place.sort_order),
     });
-    document.getElementById("quick-place-editor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document
+      .getElementById("quick-place-editor")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
   async function saveQuickPlace(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2223,25 +2602,46 @@ function AdminPanel({ backend }: { backend: Backend }) {
         sortOrder: Number(quickPlaceForm.sortOrder),
       });
       await backend.refresh();
-      setQuickPlaceForm({ ...emptyQuickPlaceForm, sortOrder: String((backend.quickPlaces.length + 2) * 10) });
-      setNotice(quickPlaceForm.id ? "Ponto rápido atualizado." : "Ponto rápido cadastrado.");
+      setQuickPlaceForm({
+        ...emptyQuickPlaceForm,
+        sortOrder: String((backend.quickPlaces.length + 2) * 10),
+      });
+      setNotice(
+        quickPlaceForm.id
+          ? "Ponto rápido atualizado."
+          : "Ponto rápido cadastrado.",
+      );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Não foi possível salvar o ponto rápido.");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível salvar o ponto rápido.",
+      );
     } finally {
       setBusyId("");
     }
   }
   async function deleteQuickPlace(place: QuickPlace) {
-    if (!window.confirm(`Excluir “${place.name}”? Essa ação não poderá ser desfeita.`)) return;
+    if (
+      !window.confirm(
+        `Excluir “${place.name}”? Essa ação não poderá ser desfeita.`,
+      )
+    )
+      return;
     setBusyId(`quick-delete-${place.id}`);
     setNotice("");
     try {
       await backend.deleteQuickPlace(place.id);
       await backend.refresh();
-      if (quickPlaceForm.id === place.id) setQuickPlaceForm(emptyQuickPlaceForm);
+      if (quickPlaceForm.id === place.id)
+        setQuickPlaceForm(emptyQuickPlaceForm);
       setNotice("Ponto rápido excluído.");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Não foi possível excluir o ponto rápido.");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível excluir o ponto rápido.",
+      );
     } finally {
       setBusyId("");
     }
@@ -2264,7 +2664,11 @@ function AdminPanel({ backend }: { backend: Backend }) {
       setNotice("Ordem dos pontos rápidos atualizada.");
     } catch (error) {
       setQuickPlaceOrder(null);
-      setNotice(error instanceof Error ? error.message : "Não foi possível atualizar a ordem.");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível atualizar a ordem.",
+      );
     } finally {
       setBusyId("");
     }
@@ -2289,7 +2693,7 @@ function AdminPanel({ backend }: { backend: Backend }) {
             <Route /> Corridas
           </button>
           <button>
-            <Bike /> Motoboys
+            <Bike /> Motoristas
           </button>
           <button>
             <Users /> Passageiros
@@ -2297,7 +2701,13 @@ function AdminPanel({ backend }: { backend: Backend }) {
           <button>
             <Wallet /> Financeiro
           </button>
-          <button onClick={() => document.getElementById("quick-places-admin")?.scrollIntoView({ behavior: "smooth" })}>
+          <button
+            onClick={() =>
+              document
+                .getElementById("quick-places-admin")
+                ?.scrollIntoView({ behavior: "smooth" })
+            }
+          >
             <MapPin /> Pontos rápidos
           </button>
           <button>
@@ -2307,7 +2717,7 @@ function AdminPanel({ backend }: { backend: Backend }) {
         <div className="admin-user">
           <span>MV</span>
           <div>
-            <b>{backend.profile?.full_name || "Central Moto VIP"}</b>
+            <b>{backend.profile?.full_name || "Central Moto SyXp"}</b>
             <small>Administrador</small>
           </div>
         </div>
@@ -2342,7 +2752,7 @@ function AdminPanel({ backend }: { backend: Backend }) {
               <Bike />
             </span>
             <div>
-              <small>Motoboys online</small>
+              <small>Motoristas online</small>
               <strong>{stats?.driversOnline || 0}</strong>
               <em>{stats?.driversAvailable || 0} disponíveis</em>
             </div>
@@ -2405,49 +2815,306 @@ function AdminPanel({ backend }: { backend: Backend }) {
               <span>DESTINOS</span>
               <h2>Pontos rápidos</h2>
             </div>
-            <em className="approval-status approved">{backend.quickPlaces.filter((place) => place.active).length} ativos</em>
+            <em className="approval-status approved">
+              {backend.quickPlaces.filter((place) => place.active).length}{" "}
+              ativos
+            </em>
           </div>
-          <p>Cadastre locais da cidade, escolha os destaques da Home e arraste os itens para mudar a ordem.</p>
-          {backend.quickPlacesError && <div className="auth-message">{backend.quickPlacesError}</div>}
+          <p>
+            Cadastre locais da cidade, escolha os destaques da Home e arraste os
+            itens para mudar a ordem.
+          </p>
+          {backend.quickPlacesError && (
+            <div className="auth-message">{backend.quickPlacesError}</div>
+          )}
           <div className="quick-places-admin-grid">
-            <form id="quick-place-editor" className="quick-place-form" onSubmit={saveQuickPlace}>
+            <form
+              id="quick-place-editor"
+              className="quick-place-form"
+              onSubmit={saveQuickPlace}
+            >
               <div className="quick-place-form-title">
-                <div><b>{quickPlaceForm.id ? "Editar ponto" : "Novo ponto rápido"}</b><small>Os campos com coordenadas são usados diretamente na rota.</small></div>
-                {quickPlaceForm.id && <button type="button" onClick={() => setQuickPlaceForm(emptyQuickPlaceForm)}>Cancelar edição</button>}
+                <div>
+                  <b>
+                    {quickPlaceForm.id ? "Editar ponto" : "Novo ponto rápido"}
+                  </b>
+                  <small>
+                    Os campos com coordenadas são usados diretamente na rota.
+                  </small>
+                </div>
+                {quickPlaceForm.id && (
+                  <button
+                    type="button"
+                    onClick={() => setQuickPlaceForm(emptyQuickPlaceForm)}
+                  >
+                    Cancelar edição
+                  </button>
+                )}
               </div>
               <div className="quick-place-fields">
-                <label><span>Nome do local</span><input required maxLength={100} value={quickPlaceForm.name} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, name: event.target.value }))} placeholder="Hospital Municipal" /></label>
-                <label className="wide"><span>Endereço completo</span><div className="address-geocode"><input required maxLength={240} value={quickPlaceForm.address} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, address: event.target.value }))} placeholder="Rua, número, bairro, Ribeira do Pombal - BA" /><button type="button" onClick={locateQuickPlace} disabled={busyId === "quick-geocode"}><Crosshair /> {busyId === "quick-geocode" ? "Localizando…" : "Localizar"}</button></div></label>
-                <label><span>Latitude</span><input required type="number" step="any" min="-90" max="90" value={quickPlaceForm.latitude} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, latitude: event.target.value }))} /></label>
-                <label><span>Longitude</span><input required type="number" step="any" min="-180" max="180" value={quickPlaceForm.longitude} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, longitude: event.target.value }))} /></label>
-                <label><span>Categoria</span><select value={quickPlaceForm.category} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, category: event.target.value as QuickPlace["category"] }))}>{QUICK_PLACE_CATEGORIES.filter((item) => item.value !== "all").map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
-                <label><span>Ordem</span><input required type="number" min="0" max="100000" value={quickPlaceForm.sortOrder} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, sortOrder: event.target.value }))} /></label>
-                <label className="color-field"><span>Cor do ícone</span><div><input type="color" value={quickPlaceForm.color} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, color: event.target.value }))} /><input required pattern="^#[0-9A-Fa-f]{6}$" value={quickPlaceForm.color} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, color: event.target.value }))} /></div></label>
+                <label>
+                  <span>Nome do local</span>
+                  <input
+                    required
+                    maxLength={100}
+                    value={quickPlaceForm.name}
+                    onChange={(event) =>
+                      setQuickPlaceForm((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                    placeholder="Hospital Municipal"
+                  />
+                </label>
+                <label className="wide">
+                  <span>Endereço completo</span>
+                  <div className="address-geocode">
+                    <input
+                      required
+                      maxLength={240}
+                      value={quickPlaceForm.address}
+                      onChange={(event) =>
+                        setQuickPlaceForm((current) => ({
+                          ...current,
+                          address: event.target.value,
+                        }))
+                      }
+                      placeholder="Rua, número, bairro, Ribeira do Pombal - BA"
+                    />
+                    <button
+                      type="button"
+                      onClick={locateQuickPlace}
+                      disabled={busyId === "quick-geocode"}
+                    >
+                      <Crosshair />{" "}
+                      {busyId === "quick-geocode"
+                        ? "Localizando…"
+                        : "Localizar"}
+                    </button>
+                  </div>
+                </label>
+                <label>
+                  <span>Latitude</span>
+                  <input
+                    required
+                    type="number"
+                    step="any"
+                    min="-90"
+                    max="90"
+                    value={quickPlaceForm.latitude}
+                    onChange={(event) =>
+                      setQuickPlaceForm((current) => ({
+                        ...current,
+                        latitude: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Longitude</span>
+                  <input
+                    required
+                    type="number"
+                    step="any"
+                    min="-180"
+                    max="180"
+                    value={quickPlaceForm.longitude}
+                    onChange={(event) =>
+                      setQuickPlaceForm((current) => ({
+                        ...current,
+                        longitude: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Categoria</span>
+                  <select
+                    value={quickPlaceForm.category}
+                    onChange={(event) =>
+                      setQuickPlaceForm((current) => ({
+                        ...current,
+                        category: event.target.value as QuickPlace["category"],
+                      }))
+                    }
+                  >
+                    {QUICK_PLACE_CATEGORIES.filter(
+                      (item) => item.value !== "all",
+                    ).map((item) => (
+                      <option value={item.value} key={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Ordem</span>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    max="100000"
+                    value={quickPlaceForm.sortOrder}
+                    onChange={(event) =>
+                      setQuickPlaceForm((current) => ({
+                        ...current,
+                        sortOrder: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="color-field">
+                  <span>Cor do ícone</span>
+                  <div>
+                    <input
+                      type="color"
+                      value={quickPlaceForm.color}
+                      onChange={(event) =>
+                        setQuickPlaceForm((current) => ({
+                          ...current,
+                          color: event.target.value,
+                        }))
+                      }
+                    />
+                    <input
+                      required
+                      pattern="^#[0-9A-Fa-f]{6}$"
+                      value={quickPlaceForm.color}
+                      onChange={(event) =>
+                        setQuickPlaceForm((current) => ({
+                          ...current,
+                          color: event.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                </label>
               </div>
               <fieldset className="icon-library">
                 <legend>Biblioteca de ícones</legend>
                 {QUICK_PLACE_ICONS.map((item) => {
                   const Icon = item.icon;
-                  return <button type="button" key={item.value} className={quickPlaceForm.icon === item.value ? "active" : ""} onClick={() => setQuickPlaceForm((current) => ({ ...current, icon: item.value }))} title={item.label}><Icon /><span>{item.label}</span></button>;
+                  return (
+                    <button
+                      type="button"
+                      key={item.value}
+                      className={
+                        quickPlaceForm.icon === item.value ? "active" : ""
+                      }
+                      onClick={() =>
+                        setQuickPlaceForm((current) => ({
+                          ...current,
+                          icon: item.value,
+                        }))
+                      }
+                      title={item.label}
+                    >
+                      <Icon />
+                      <span>{item.label}</span>
+                    </button>
+                  );
                 })}
               </fieldset>
               <div className="quick-place-options">
-                <label><input type="checkbox" checked={quickPlaceForm.active} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, active: event.target.checked }))} /> Ativo</label>
-                <label><input type="checkbox" checked={quickPlaceForm.featured} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, featured: event.target.checked }))} /> ⭐ Exibir na tela inicial</label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={quickPlaceForm.active}
+                    onChange={(event) =>
+                      setQuickPlaceForm((current) => ({
+                        ...current,
+                        active: event.target.checked,
+                      }))
+                    }
+                  />{" "}
+                  Ativo
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={quickPlaceForm.featured}
+                    onChange={(event) =>
+                      setQuickPlaceForm((current) => ({
+                        ...current,
+                        featured: event.target.checked,
+                      }))
+                    }
+                  />{" "}
+                  ⭐ Exibir na tela inicial
+                </label>
               </div>
-              <Button disabled={busyId === "quick-place-save"}>{busyId === "quick-place-save" ? "SALVANDO…" : quickPlaceForm.id ? "SALVAR ALTERAÇÕES" : "CADASTRAR PONTO"}</Button>
+              <Button disabled={busyId === "quick-place-save"}>
+                {busyId === "quick-place-save"
+                  ? "SALVANDO…"
+                  : quickPlaceForm.id
+                    ? "SALVAR ALTERAÇÕES"
+                    : "CADASTRAR PONTO"}
+              </Button>
             </form>
             <div className="quick-place-admin-list">
-              <div className="quick-place-list-title"><div><b>Pontos cadastrados</b><small>Arraste pelo ícone para reordenar</small></div>{busyId === "quick-order" && <span>Salvando ordem…</span>}</div>
-              {backend.quickPlacesLoading ? <div className="quick-place-state">Carregando…</div> : orderedQuickPlaces.length ? orderedQuickPlaces.map((place) => (
-                <article key={place.id} draggable onDragStart={() => setDraggedPlaceId(place.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => void dropQuickPlace(place.id)} className={draggedPlaceId === place.id ? "dragging" : ""}>
-                  <GripVertical className="drag-handle" />
-                  <span className="admin-place-icon" style={{ backgroundColor: `${place.color}18` }}><QuickPlaceIcon name={place.icon} color={place.color} /></span>
-                  <div><b>{place.featured ? "⭐ " : ""}{place.name}</b><small>{place.address}</small><em>{QUICK_PLACE_CATEGORIES.find((item) => item.value === place.category)?.label || place.category} · {place.active ? "Ativo" : "Inativo"}</em></div>
-                  <button type="button" onClick={() => editQuickPlace(place)} aria-label={`Editar ${place.name}`}><Pencil /></button>
-                  <button type="button" className="delete" disabled={busyId === `quick-delete-${place.id}`} onClick={() => void deleteQuickPlace(place)} aria-label={`Excluir ${place.name}`}><Trash2 /></button>
-                </article>
-              )) : <div className="quick-place-state">Nenhum ponto rápido cadastrado.</div>}
+              <div className="quick-place-list-title">
+                <div>
+                  <b>Pontos cadastrados</b>
+                  <small>Arraste pelo ícone para reordenar</small>
+                </div>
+                {busyId === "quick-order" && <span>Salvando ordem…</span>}
+              </div>
+              {backend.quickPlacesLoading ? (
+                <div className="quick-place-state">Carregando…</div>
+              ) : orderedQuickPlaces.length ? (
+                orderedQuickPlaces.map((place) => (
+                  <article
+                    key={place.id}
+                    draggable
+                    onDragStart={() => setDraggedPlaceId(place.id)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => void dropQuickPlace(place.id)}
+                    className={draggedPlaceId === place.id ? "dragging" : ""}
+                  >
+                    <GripVertical className="drag-handle" />
+                    <span
+                      className="admin-place-icon"
+                      style={{ backgroundColor: `${place.color}18` }}
+                    >
+                      <QuickPlaceIcon name={place.icon} color={place.color} />
+                    </span>
+                    <div>
+                      <b>
+                        {place.featured ? "⭐ " : ""}
+                        {place.name}
+                      </b>
+                      <small>{place.address}</small>
+                      <em>
+                        {QUICK_PLACE_CATEGORIES.find(
+                          (item) => item.value === place.category,
+                        )?.label || place.category}{" "}
+                        · {place.active ? "Ativo" : "Inativo"}
+                      </em>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => editQuickPlace(place)}
+                      aria-label={`Editar ${place.name}`}
+                    >
+                      <Pencil />
+                    </button>
+                    <button
+                      type="button"
+                      className="delete"
+                      disabled={busyId === `quick-delete-${place.id}`}
+                      onClick={() => void deleteQuickPlace(place)}
+                      aria-label={`Excluir ${place.name}`}
+                    >
+                      <Trash2 />
+                    </button>
+                  </article>
+                ))
+              ) : (
+                <div className="quick-place-state">
+                  Nenhum ponto rápido cadastrado.
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -2460,8 +3127,8 @@ function AdminPanel({ backend }: { backend: Backend }) {
             <em className="approval-status approved">Preço por bairro ativo</em>
           </div>
           <p>
-            O destino define o preço. Sem uma tarifa especial correspondente,
-            o sistema usa a tarifa padrão da cidade.
+            O destino define o preço. Sem uma tarifa especial correspondente, o
+            sistema usa a tarifa padrão da cidade.
           </p>
           <div className="region-fare-table">
             <div className="region-fare-head">
@@ -2646,7 +3313,7 @@ function AdminPanel({ backend }: { backend: Backend }) {
           <div className="card-title">
             <div>
               <span>CADASTROS</span>
-              <h2>Aprovação de motoboys</h2>
+              <h2>Aprovação de motoristas</h2>
             </div>
           </div>
           {notice && <div className="auth-message">{notice}</div>}
@@ -2761,7 +3428,7 @@ export default function Home() {
     role === "passenger"
       ? "Passageiro"
       : role === "driver"
-        ? "Motoboy"
+        ? "Motorista"
         : "Central";
   if (backend.loading)
     return (
@@ -2807,46 +3474,92 @@ export default function Home() {
       <header className="topbar">
         {role === "passenger" && (
           <details className="mobile-menu">
-            <summary aria-label="Abrir menu"><Menu /></summary>
+            <summary aria-label="Abrir menu">
+              <Menu />
+            </summary>
             <nav>
-              <a href="#destination-address"><Bike /> Pedir corrida</a>
-              <a href="#passenger-history"><History /> Minhas corridas</a>
-              <a href="#passenger-notifications"><Bell /> Notificações</a>
-              <a href="mailto:suporte@motovip.app"><Headphones /> Suporte</a>
+              <a href="#destination-address">
+                <Bike /> Pedir corrida
+              </a>
+              <a href="#passenger-history">
+                <History /> Minhas corridas
+              </a>
+              <a href="#passenger-notifications">
+                <Bell /> Notificações
+              </a>
+              <a href="mailto:suporte@motovip.app">
+                <Headphones /> Suporte
+              </a>
             </nav>
           </details>
         )}
         <Brand />
         {role === "passenger" ? (
           <>
-            <nav className="passenger-top-nav" aria-label="Navegação do passageiro">
-              <a className="active" href="#destination-address"><HomeIcon /> Início</a>
-              <a href="#passenger-history"><History /> Minhas corridas</a>
-              <button type="button"><Ticket /> Cupons</button>
-              <a href="#passenger-notifications"><Bell /> Notificações{backend.unreadNotifications > 0 && <b>{backend.unreadNotifications}</b>}</a>
-              <a href="mailto:suporte@motovip.app"><Headphones /> Suporte</a>
+            <nav
+              className="passenger-top-nav"
+              aria-label="Navegação do passageiro"
+            >
+              <a className="active" href="#destination-address">
+                <HomeIcon /> Início
+              </a>
+              <a href="#passenger-history">
+                <History /> Minhas corridas
+              </a>
+              <button type="button">
+                <Ticket /> Cupons
+              </button>
+              <a href="#passenger-notifications">
+                <Bell /> Notificações
+                {backend.unreadNotifications > 0 && (
+                  <b>{backend.unreadNotifications}</b>
+                )}
+              </a>
+              <a href="mailto:suporte@motovip.app">
+                <Headphones /> Suporte
+              </a>
             </nav>
-            <button className="header-location" type="button" onClick={() => document.querySelector<HTMLButtonElement>(".field-action")?.click()}>
-              <MapPin /><span>Minha localização</span>
+            <button
+              className="header-location"
+              type="button"
+              onClick={() =>
+                document
+                  .querySelector<HTMLButtonElement>(".field-action")
+                  ?.click()
+              }
+            >
+              <MapPin />
+              <span>Minha localização</span>
             </button>
           </>
         ) : (
           <TabsList className="role-switch" aria-label="Ambiente autorizado">
             {backend.profile?.role === "driver" && (
-              <TabsTrigger value="driver"><Bike /> Motoboy</TabsTrigger>
+              <TabsTrigger value="driver">
+                <Bike /> Motorista
+              </TabsTrigger>
             )}
             {backend.profile?.role === "admin" && (
-              <TabsTrigger value="admin"><Gauge /> Central</TabsTrigger>
+              <TabsTrigger value="admin">
+                <Gauge /> Central
+              </TabsTrigger>
             )}
           </TabsList>
         )}
         <details className="account-actions">
           <summary aria-label="Abrir menu da conta">
-            <span className="account-avatar"><UserRound /></span>
-            <span className="account-copy"><b>{backend.profile?.full_name || contextLabel}</b><small>{contextLabel}</small></span>
+            <span className="account-avatar">
+              <UserRound />
+            </span>
+            <span className="account-copy">
+              <b>{backend.profile?.full_name || contextLabel}</b>
+              <small>{contextLabel}</small>
+            </span>
             <ChevronRight />
           </summary>
-          <div><button onClick={() => backend.signOut()}>Sair da conta</button></div>
+          <div>
+            <button onClick={() => backend.signOut()}>Sair da conta</button>
+          </div>
         </details>
       </header>
       {backend.error && <div className="backend-warning">{backend.error}</div>}
