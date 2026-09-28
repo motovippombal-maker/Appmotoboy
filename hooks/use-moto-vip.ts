@@ -7,6 +7,7 @@ import { friendlyAuthError } from "@/lib/supabase/auth-errors";
 
 export type Profile = { id: string; role: "passenger" | "driver" | "admin"; full_name: string; phone?: string; avatar_url?: string; blocked: boolean };
 export type Ride = { id: string; passenger_id: string; driver_id?: string; status: string; origin_address: string; origin_lat: number; origin_lng: number; destination_address: string; destination_lat: number; destination_lng: number; distance_meters: number; duration_seconds: number; route_geometry?: string; fare_cents: number; estimated_distance_meters?: number; estimated_duration_seconds?: number; estimated_fare_cents?: number; tracked_distance_meters?: number; actual_distance_meters?: number; actual_duration_seconds?: number; final_fare_cents?: number; fare_region_id?: string; fare_region_name?: string; fare_pricing_mode?: "distance" | "region"; started_at?: string; completed_at?: string; created_at: string; payment_method: string; payment_status: string; driver?: { profile_id: string; rating: number; profiles?: { full_name: string; phone?: string; avatar_url?: string }; vehicles?: Array<{ brand: string; model: string; color: string; plate: string }> }; passenger?: { full_name: string; phone?: string } };
+export type AddressResult = { id: string; address: string; shortAddress: string; lat: number; lng: number; city: string; state: string; approximate: boolean };
 export type RideOffer = { id: string; ride_id: string; expires_at: string; passenger_name: string; distance_to_pickup_meters: number | null; ride: Ride };
 export type NearbyDriver = { markerId: string; latitude: number; longitude: number; distanceMeters: number };
 export type DriverLocation = { lat: number; lng: number; accuracyMeters?: number; updatedAt: string; distanceToOriginMeters?: number };
@@ -214,6 +215,8 @@ export function useMotoVip() {
     signOut: () => supabase.auth.signOut(),
     requestRide: async (payload: unknown) => { const result = await api<{ ride: Ride }>("/api/rides/request", { method: "POST", body: JSON.stringify(payload) }); setCompletedRide(null); setActiveRide(result.ride); return result.ride; },
     estimateRide: (payload: unknown) => api<{ origin: { address: string; lat: number; lng: number }; destination: { address: string; lat: number; lng: number }; distanceMeters: number; durationSeconds: number; geometry: string; fareCents: number; fareRegion: { id: string; name: string; isDefault: boolean }; pricingMode: "region" }>("/api/maps/estimate", { method: "POST", body: JSON.stringify(payload) }),
+    searchAddresses: (query: string, signal?: AbortSignal) => api<{ results: AddressResult[] }>(`/api/maps/search?q=${encodeURIComponent(query)}`, { signal }),
+    reverseAddress: (lat: number, lng: number) => api<AddressResult>("/api/maps/reverse", { method: "POST", body: JSON.stringify({ lat, lng }) }),
     findNearbyDrivers: (origin: { lat: number; lng: number }) => api<{ radiusKm: number; freshnessSeconds: number; drivers: NearbyDriver[] }>("/api/drivers/nearby", { method: "POST", body: JSON.stringify(origin) }),
     acceptRide: (rideId: string) => api(`/api/rides/${rideId}/accept`, { method: "POST" }),
     declineRide: (rideId: string) => api(`/api/rides/${rideId}/decline`, { method: "POST" }),

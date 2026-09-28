@@ -62,6 +62,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useMotoVip,
+  type AddressResult,
   type FareConfig,
   type NearbyDriver,
   type QuickPlace,
@@ -295,6 +296,7 @@ function MapCanvas({
   route = [],
   admin = false,
   connected = true,
+  onRequestLocation,
 }: {
   origin?: LivePoint;
   destination?: LivePoint;
@@ -303,6 +305,7 @@ function MapCanvas({
   route?: Array<[number, number]>;
   admin?: boolean;
   connected?: boolean;
+  onRequestLocation?: () => void;
 }) {
   const [locationStatus, setLocationStatus] = useState(
     "Usar minha localização",
@@ -354,7 +357,7 @@ function MapCanvas({
         <button
           aria-label={locationStatus}
           title={locationStatus}
-          onClick={requestLocation}
+          onClick={onRequestLocation || requestLocation}
         >
           <Crosshair />
         </button>
@@ -365,48 +368,162 @@ function MapCanvas({
 }
 
 function AddressField({
+  backend,
   icon,
   label,
   value,
+  selected,
   onChange,
+  onSelect,
   accent,
   placeholder = "Digite um endereço",
-  action,
-  actionLabel,
+  onUseGps,
+  onOpenMap,
+  gpsBusy = false,
   inputId,
 }: {
+  backend: Backend;
   icon: React.ReactNode;
   label: string;
   value: string;
+  selected: AddressResult | null;
   onChange: (value: string) => void;
+  onSelect: (result: AddressResult) => void;
   accent?: boolean;
   placeholder?: string;
-  action?: () => void;
-  actionLabel?: string;
+  onUseGps?: () => void;
+  onOpenMap: () => void;
+  gpsBusy?: boolean;
   inputId?: string;
 }) {
+  const [focused, setFocused] = useState(false);
+  const [suggestions, setSuggestions] = useState<AddressResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
+
+  useEffect(() => {
+    const query = value.trim();
+    if (!focused || selected || query.length < 3) return;
+    let current = true;
+    const timer = window.setTimeout(() => {
+      setSearching(true);
+      setSearchError("");
+      void backend.searchAddresses(query).then(({ results }) => {
+        if (!current) return;
+        setSuggestions(results);
+        setSearching(false);
+        if (!results.length) setSearchError("Nenhum endereço encontrado. Você pode escolher o ponto no mapa.");
+      }).catch((error: unknown) => {
+        if (!current) return;
+        setSearching(false);
+        setSearchError(error instanceof Error ? error.message : "Não foi possível buscar endereços.");
+      });
+    }, 450);
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [backend, focused, selected, value]);
+
   return (
-    <label className={`address-field ${accent ? "accent" : ""}`}>
-      <span className="field-icon">{icon}</span>
-      <span className="field-copy">
-        <small>{label}</small>
-        <input
-          id={inputId}
-          required
-          value={value}
-          placeholder={placeholder}
-          onChange={(event) => onChange(event.target.value)}
-          aria-label={label}
-        />
-      </span>
-      {action ? (
-        <button type="button" className="field-action" onClick={action} aria-label={actionLabel}>
-          {accent ? <Search /> : <Crosshair />}
-        </button>
-      ) : (
-        <ChevronRight className="field-chevron" />
+    <div className={`smart-address ${focused ? "is-focused" : ""}`}>
+      <label className={`address-field ${accent ? "accent" : ""}`}>
+        <span className="field-icon">{icon}</span>
+        <span className="field-copy">
+          <small>{label}</small>
+          <input
+            id={inputId}
+            required
+            autoComplete="off"
+            value={value}
+            placeholder={placeholder}
+            onFocus={() => setFocused(true)}
+            onBlur={() => window.setTimeout(() => setFocused(false), 180)}
+            onChange={(event) => { setSuggestions([]); setSearchError(""); setSearching(event.target.value.trim().length >= 3); onChange(event.target.value); }}
+            aria-label={label}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={focused && (suggestions.length > 0 || Boolean(searchError))}
+            aria-controls={`${inputId}-suggestions`}
+          />
+        </span>
+        <span className="field-actions">
+          {onUseGps && (
+            <button type="button" className="field-action" onClick={onUseGps} aria-label="Usar localização atual" disabled={gpsBusy}>
+              <Crosshair className={gpsBusy ? "is-spinning" : ""} />
+            </button>
+          )}
+          <button type="button" className="field-action" onClick={onOpenMap} aria-label={`Escolher ${label.toLowerCase()} no mapa`}>
+            <MapPin />
+          </button>
+        </span>
+      </label>
+      {focused && !selected && value.trim().length >= 3 && (
+        <div id={`${inputId}-suggestions`} className="address-suggestions" role="listbox" aria-label={`Sugestões para ${label}`}>
+          {searching && <div className="address-search-state"><Search className="is-spinning" /> Buscando endereços…</div>}
+          {!searching && suggestions.map((result) => (
+            <button key={result.id} type="button" role="option" aria-selected="false" onMouseDown={(event) => event.preventDefault()} onClick={() => { onSelect(result); setFocused(false); }}>
+              <MapPin />
+              <span><b>{result.shortAddress}</b><small>{result.approximate ? "Número aproximado — ajuste o ponto no mapa se necessário" : result.address}</small></span>
+              <ChevronRight />
+            </button>
+          ))}
+          {!searching && searchError && <div className="address-search-state error">{searchError}</div>}
+          {!searching && (searchError || suggestions.some((item) => item.approximate)) && (
+            <button type="button" className="address-map-option" onMouseDown={(event) => event.preventDefault()} onClick={onOpenMap}><Layers /> Escolher ou ajustar no mapa</button>
+          )}
+        </div>
       )}
-    </label>
+    </div>
+  );
+}
+
+function MapAddressPicker({
+  backend,
+  kind,
+  initial,
+  onClose,
+  onConfirm,
+}: {
+  backend: Backend;
+  kind: "origin" | "destination";
+  initial: AddressResult | null;
+  onClose: () => void;
+  onConfirm: (result: AddressResult) => void;
+}) {
+  const [point, setPoint] = useState<LivePoint>(initial || { lat: -10.8373, lng: -38.5357, label: "Centro de Ribeira do Pombal" });
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function confirm() {
+    setBusy(true);
+    setMessage("Identificando o endereço do ponto…");
+    try {
+      const result = await backend.reverseAddress(point.lat, point.lng);
+      onConfirm(result);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível identificar esse ponto.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="map-picker-overlay" role="dialog" aria-modal="true" aria-labelledby="map-picker-title">
+      <div className="map-picker-sheet">
+        <header>
+          <div><small>SELEÇÃO MANUAL</small><h2 id="map-picker-title">Escolher {kind === "origin" ? "origem" : "destino"} no mapa</h2></div>
+          <button type="button" onClick={onClose} aria-label="Fechar mapa"><X /></button>
+        </header>
+        <p>Clique no mapa ou arraste o marcador até o ponto exato. Depois confirme o endereço.</p>
+        <div className="map-picker-canvas">
+          <RealMap pickPoint={point} onPick={setPoint} />
+        </div>
+        <div className="map-picker-coordinates"><MapPin /> {point.lat.toFixed(6)}, {point.lng.toFixed(6)}</div>
+        {message && <div className="map-picker-message" role="status">{message}</div>}
+        <div className="map-picker-actions">
+          <button type="button" onClick={onClose}>Cancelar</button>
+          <button type="button" onClick={confirm} disabled={busy}><Check /> {busy ? "Confirmando…" : "Confirmar este ponto"}</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -419,19 +536,19 @@ function gpsPosition() {
     navigator.geolocation.getCurrentPosition(
       resolve,
       (error) => reject(new Error(geolocationMessage(error))),
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     );
   });
 }
 
 function geolocationMessage(error: GeolocationPositionError) {
   if (error.code === 1)
-    return "Permissão de localização negada. Autorize o GPS nas configurações do navegador.";
+    return "Permissão de localização negada";
   if (error.code === 2)
-    return "Localização indisponível. Verifique se o GPS do aparelho está ativado.";
+    return "Não foi possível obter sua localização. Verifique se o GPS está ativado.";
   if (error.code === 3)
-    return "O GPS demorou para responder. Vá para uma área aberta e tente novamente.";
-  return "O sinal de GPS foi perdido temporariamente.";
+    return "Não foi possível obter sua localização. O GPS demorou para responder.";
+  return "Não foi possível obter sua localização";
 }
 
 function rideStage(ride: Ride | null, hasEstimate: boolean) {
@@ -512,6 +629,11 @@ function NotificationsPanel({ backend, id }: { backend: Backend; id?: string }) 
 function PassengerPanel({ backend }: { backend: Backend }) {
   const [originAddress, setOriginAddress] = useState("");
   const [destinationAddress, setDestinationAddress] = useState("");
+  const [originPoint, setOriginPoint] = useState<AddressResult | null>(null);
+  const [destinationPoint, setDestinationPoint] = useState<AddressResult | null>(null);
+  const [locationStatus, setLocationStatus] = useState("");
+  const [gpsBusy, setGpsBusy] = useState(false);
+  const [mapPicker, setMapPicker] = useState<"origin" | "destination" | null>(null);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -548,7 +670,9 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           lng: estimate.origin.lng,
           label: estimate.origin.address,
         }
-      : undefined;
+      : originPoint
+        ? { lat: originPoint.lat, lng: originPoint.lng, label: originPoint.shortAddress }
+        : undefined;
   const destination = ride
     ? {
         lat: ride.destination_lat,
@@ -561,7 +685,9 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           lng: estimate.destination.lng,
           label: estimate.destination.address,
         }
-      : undefined;
+      : destinationPoint
+        ? { lat: destinationPoint.lat, lng: destinationPoint.lng, label: destinationPoint.shortAddress }
+        : undefined;
   const driverName = ride?.driver?.profiles?.full_name || "Seu Moto VIP";
   const vehicle = ride?.driver?.vehicles?.[0];
   const driverDistance =
@@ -586,20 +712,37 @@ function PassengerPanel({ backend }: { backend: Backend }) {
     return !search || `${place.name} ${place.address}`.toLocaleLowerCase("pt-BR").includes(search);
   });
 
+  async function locateDevice() {
+    setLocationStatus("Obtendo sua localização…");
+    const position = await gpsPosition();
+    const result = await backend.reverseAddress(position.coords.latitude, position.coords.longitude);
+    await backend.updateLocation(position).catch(() => undefined);
+    return result;
+  }
+
   async function useCurrentLocation() {
     setNotice("");
+    setGpsBusy(true);
     try {
-      await gpsPosition();
-      setOriginAddress("Localização atual");
-      setNotice("Localização atual pronta para o cálculo da rota.");
+      const result = await locateDevice();
+      setOriginPoint(result);
+      setOriginAddress(result.address);
+      setEstimate(null);
+      setLocationStatus("Localização encontrada");
+      setNotice("Localização encontrada");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Não foi possível acessar o GPS.");
+      const message = error instanceof Error ? error.message : "Não foi possível obter sua localização";
+      setLocationStatus(message);
+      setNotice(message);
+    } finally {
+      setGpsBusy(false);
     }
   }
 
   function chooseQuickPlace(place: QuickPlace) {
     setSelectedQuickPlace(place);
     setDestinationAddress(place.address);
+    setDestinationPoint({ id: place.id, address: place.address, shortAddress: place.name, lat: place.latitude, lng: place.longitude, city: "Ribeira do Pombal", state: "BA", approximate: false });
     setEstimate(null);
     setQuickPlacesOpen(false);
     setNotice(`${place.name} definido como destino. Toque em “Ver valor da corrida” para calcular a rota.`);
@@ -622,26 +765,29 @@ function PassengerPanel({ backend }: { backend: Backend }) {
     setBusy(true);
     setNotice("");
     try {
-      const position = await gpsPosition().catch((error) => {
-        if (!originAddress.trim()) throw error;
-        return null;
-      });
-      if (!position && !originAddress.trim())
-        throw new Error("Ative o GPS ou informe o endereço de embarque.");
+      let resolvedOrigin = originPoint;
+      if (!resolvedOrigin && !originAddress.trim()) {
+        resolvedOrigin = await locateDevice();
+        setOriginPoint(resolvedOrigin);
+        setOriginAddress(resolvedOrigin.address);
+        setLocationStatus("Localização encontrada");
+      }
       const result = await backend.estimateRide({
-        origin: {
-          address: position ? "Localização atual" : originAddress,
-          lat: position?.coords.latitude,
-          lng: position?.coords.longitude,
-        },
-        destination: selectedQuickPlace
-          ? { address: selectedQuickPlace.address, lat: selectedQuickPlace.latitude, lng: selectedQuickPlace.longitude }
-          : { address: destinationAddress },
+        origin: resolvedOrigin
+          ? { address: resolvedOrigin.address, lat: resolvedOrigin.lat, lng: resolvedOrigin.lng }
+          : { address: originAddress },
+        destination: destinationPoint
+          ? { address: destinationPoint.address, lat: destinationPoint.lat, lng: destinationPoint.lng }
+          : selectedQuickPlace
+            ? { address: selectedQuickPlace.address, lat: selectedQuickPlace.latitude, lng: selectedQuickPlace.longitude }
+            : { address: destinationAddress },
       });
       const nearby = await backend.findNearbyDrivers(result.origin);
       setEstimate(result);
       setOriginAddress(result.origin.address);
       setDestinationAddress(result.destination.address);
+      setOriginPoint({ id: "estimated-origin", address: result.origin.address, shortAddress: result.origin.address.split(",").slice(0, 3).join(","), lat: result.origin.lat, lng: result.origin.lng, city: "", state: "", approximate: false });
+      setDestinationPoint({ id: "estimated-destination", address: result.destination.address, shortAddress: result.destination.address.split(",").slice(0, 3).join(","), lat: result.destination.lat, lng: result.destination.lng, city: "", state: "", approximate: false });
       setNearbyDrivers(nearby.drivers);
       setNotice(
         nearby.drivers.length
@@ -787,6 +933,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           nearbyDrivers={nearbyDrivers}
           route={route}
           connected={isOnline && backend.realtimeStatus !== "CLOSED"}
+          onRequestLocation={useCurrentLocation}
           driver={
             backend.driverLocation
               ? {
@@ -824,31 +971,45 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           <>
             <div className="address-stack">
               <AddressField
+                backend={backend}
                 icon={<MapPin />}
                 label="Onde você está?"
                 value={originAddress}
-                onChange={setOriginAddress}
-                placeholder="Usar minha localização atual"
-                action={useCurrentLocation}
-                actionLabel="Detectar minha localização"
+                selected={originPoint}
+                onChange={(value) => { setOriginAddress(value); setOriginPoint(null); setEstimate(null); setLocationStatus(""); }}
+                onSelect={(result) => { setOriginPoint(result); setOriginAddress(result.address); setEstimate(null); setLocationStatus("Localização encontrada"); }}
+                placeholder="Digite o endereço ou use o GPS"
+                onUseGps={useCurrentLocation}
+                onOpenMap={() => setMapPicker("origin")}
+                gpsBusy={gpsBusy}
                 inputId="origin-address"
               />
               <AddressField
+                backend={backend}
                 icon={<Navigation />}
                 label="Para onde você vai?"
                 value={destinationAddress}
+                selected={destinationPoint}
                 onChange={(value) => {
                   setDestinationAddress(value);
+                  setDestinationPoint(null);
                   setSelectedQuickPlace(null);
                   setEstimate(null);
                 }}
+                onSelect={(result) => {
+                  setDestinationPoint(result);
+                  setDestinationAddress(result.address);
+                  setSelectedQuickPlace(null);
+                  setEstimate(null);
+                  setNotice(result.approximate ? "Rua encontrada. Confirme ou ajuste o ponto no mapa." : "Destino selecionado.");
+                }}
                 placeholder="Digite um endereço ou selecione um ponto"
-                action={() => document.getElementById("destination-address")?.focus()}
-                actionLabel="Pesquisar destino"
+                onOpenMap={() => setMapPicker("destination")}
                 inputId="destination-address"
                 accent
               />
             </div>
+            {locationStatus && <div className={`location-feedback ${locationStatus === "Localização encontrada" ? "success" : ""}`} role="status"><Crosshair /> {locationStatus}</div>}
             <div className="quick-place-section">
               <div className="quick-place-heading">
                 <b>Pontos rápidos de Ribeira do Pombal</b>
@@ -1249,6 +1410,28 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             </div>
           </section>
         </div>
+      )}
+      {mapPicker && (
+        <MapAddressPicker
+          backend={backend}
+          kind={mapPicker}
+          initial={mapPicker === "origin" ? originPoint : destinationPoint}
+          onClose={() => setMapPicker(null)}
+          onConfirm={(result) => {
+            if (mapPicker === "origin") {
+              setOriginPoint(result);
+              setOriginAddress(result.address);
+              setLocationStatus("Localização encontrada");
+            } else {
+              setDestinationPoint(result);
+              setDestinationAddress(result.address);
+              setSelectedQuickPlace(null);
+              setNotice("Destino selecionado no mapa.");
+            }
+            setEstimate(null);
+            setMapPicker(null);
+          }}
+        />
       )}
     </div>
   );

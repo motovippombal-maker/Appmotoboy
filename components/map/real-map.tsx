@@ -5,6 +5,16 @@ import type { Map as LeafletMap, Marker, Polyline } from "leaflet";
 
 export type LivePoint = { lat: number; lng: number; label?: string };
 
+type RealMapProps = {
+  origin?: LivePoint;
+  destination?: LivePoint;
+  driver?: LivePoint;
+  nearbyDrivers?: LivePoint[];
+  route?: Array<[number, number]>;
+  pickPoint?: LivePoint;
+  onPick?: (point: LivePoint) => void;
+};
+
 const CITY_PLACES = [
   { lat: -10.8349, lng: -38.5402, label: "Prefeitura", symbol: "P", tone: "blue" },
   { lat: -10.8389, lng: -38.5318, label: "Hospital", symbol: "+", tone: "red" },
@@ -12,12 +22,16 @@ const CITY_PLACES = [
   { lat: -10.8448, lng: -38.5365, label: "Praça Central", symbol: "●", tone: "green" },
 ] as const;
 
-export function RealMap({ origin, destination, driver, nearbyDrivers = [], route }: { origin?: LivePoint; destination?: LivePoint; driver?: LivePoint; nearbyDrivers?: LivePoint[]; route?: Array<[number, number]> }) {
+export function RealMap({ origin, destination, driver, nearbyDrivers = [], route, pickPoint, onPick }: RealMapProps) {
   const elementRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const layersRef = useRef<Array<Marker | Polyline>>([]);
   const driverMarkerRef = useRef<Marker | null>(null);
+  const pickMarkerRef = useRef<Marker | null>(null);
+  const onPickRef = useRef(onPick);
   const [mapReady, setMapReady] = useState(false);
+
+  useEffect(() => { onPickRef.current = onPick; }, [onPick]);
 
   useEffect(() => {
     if (!elementRef.current || mapRef.current) return;
@@ -41,8 +55,35 @@ export function RealMap({ origin, destination, driver, nearbyDrivers = [], route
       L.control.zoom({ position: "bottomright" }).addTo(map);
       mapRef.current = map; setMapReady(true);
     });
-    return () => { disposed = true; driverMarkerRef.current = null; mapRef.current?.remove(); mapRef.current = null; };
+    return () => { disposed = true; driverMarkerRef.current = null; pickMarkerRef.current = null; mapRef.current?.remove(); mapRef.current = null; };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current; if (!map || !mapReady || !onPickRef.current) return;
+    const select = (event: { latlng: { lat: number; lng: number } }) => onPickRef.current?.({ lat: event.latlng.lat, lng: event.latlng.lng, label: "Ponto selecionado" });
+    map.on("click", select);
+    return () => { map.off("click", select); };
+  }, [mapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current; if (!map || !mapReady) return;
+    if (!pickPoint) { pickMarkerRef.current?.remove(); pickMarkerRef.current = null; return; }
+    void import("leaflet").then((module) => {
+      const L = module.default;
+      if (pickMarkerRef.current) {
+        pickMarkerRef.current.setLatLng([pickPoint.lat, pickPoint.lng]);
+      } else {
+        const icon = L.divIcon({ className: "live-map-icon map-pick-marker", html: "<span>●</span>", iconSize: [44, 44], iconAnchor: [22, 38] });
+        const marker = L.marker([pickPoint.lat, pickPoint.lng], { icon, draggable: true }).addTo(map).bindTooltip("Arraste para ajustar o ponto");
+        marker.on("dragend", () => {
+          const point = marker.getLatLng();
+          onPickRef.current?.({ lat: point.lat, lng: point.lng, label: "Ponto selecionado" });
+        });
+        pickMarkerRef.current = marker;
+      }
+      map.setView([pickPoint.lat, pickPoint.lng], Math.max(map.getZoom(), 16));
+    });
+  }, [mapReady, pickPoint]);
 
   useEffect(() => {
     const map = mapRef.current; if (!map || !mapReady) return;
@@ -75,5 +116,5 @@ export function RealMap({ origin, destination, driver, nearbyDrivers = [], route
     });
   }, [destination, driver, mapReady, origin]);
 
-  return <div ref={elementRef} className="real-map" aria-label="Mapa OpenStreetMap da corrida" />;
+  return <div ref={elementRef} className={`real-map ${onPick ? "is-picking" : ""}`} aria-label={onPick ? "Mapa para selecionar um endereço" : "Mapa OpenStreetMap da corrida"} />;
 }

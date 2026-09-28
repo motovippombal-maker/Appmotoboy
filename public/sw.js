@@ -1,5 +1,5 @@
-const SHELL_CACHE = "moto-vip-shell-v3";
-const STATIC_CACHE = "moto-vip-static-v3";
+const SHELL_CACHE = "moto-vip-shell-v4";
+const STATIC_CACHE = "moto-vip-static-v4";
 const SHELL_ASSETS = [
   "/offline.html",
   "/manifest.webmanifest",
@@ -42,12 +42,13 @@ self.addEventListener("fetch", (event) => {
   const isStaticAsset = url.pathname.startsWith("/_next/static/") || url.pathname.startsWith("/assets/") || /\.(?:css|js|woff2?|png|svg|ico)$/.test(url.pathname);
   if (!isStaticAsset) return;
   event.respondWith(caches.open(STATIC_CACHE).then(async (cache) => {
-    const cached = await cache.match(request);
-    const network = fetch(request).then((response) => {
+    try {
+      const response = await fetch(request);
       if (response.ok && response.type === "basic" && response.headers.get("cache-control") !== "no-store") void cache.put(request, response.clone());
       return response;
-    });
-    return cached || network;
+    } catch {
+      return (await cache.match(request)) || Response.error();
+    }
   }));
 });
 

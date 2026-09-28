@@ -3,18 +3,16 @@ import { ApiError, consumeRateLimit, jsonError, requireUser } from "@/lib/backen
 import { calculateRoute } from "@/lib/backend/routing";
 import { requireConfiguredFare } from "@/lib/backend/fare";
 import { regionLabels, resolveRegionFare } from "@/lib/backend/region-fare";
+import { searchAddresses } from "@/lib/backend/geocoding";
 
 const point = z.object({ address: z.string().min(3).max(200), lat: z.number().min(-90).max(90).optional(), lng: z.number().min(-180).max(180).optional() });
 const schema = z.object({ origin: point, destination: point });
 
 async function resolvePoint(input: z.infer<typeof point>) {
   if (input.lat !== undefined && input.lng !== undefined) return { address: input.address, lat: input.lat, lng: input.lng, regionLabels: [] as string[] };
-  const query = encodeURIComponent(`${input.address}, Ribeira do Pombal, Bahia, Brasil`);
-  const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&countrycodes=br&q=${query}`, { headers: { "User-Agent": "MotoVIP/1.0", "Accept-Language": "pt-BR" }, cache: "no-store", signal: AbortSignal.timeout(8000) });
-  if (!response.ok) throw new ApiError(503, "Busca de endereço indisponível.", "GEOCODING_UNAVAILABLE");
-  const result = await response.json() as Array<{ lat: string; lon: string; display_name: string; address?: Record<string, string> }>;
-  if (!result[0]) throw new ApiError(422, `Endereço não encontrado: ${input.address}`, "ADDRESS_NOT_FOUND");
-  return { address: result[0].display_name, lat: Number(result[0].lat), lng: Number(result[0].lon), regionLabels: regionLabels(result[0].address) };
+  const [result] = await searchAddresses(input.address);
+  if (!result) throw new ApiError(422, `Endereço não encontrado: ${input.address}`, "ADDRESS_NOT_FOUND");
+  return { address: result.address, lat: result.lat, lng: result.lng, regionLabels: regionLabels({ city: result.city, state: result.state }) };
 }
 
 export async function POST(request: Request) {

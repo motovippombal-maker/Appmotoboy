@@ -17,6 +17,10 @@ export function PwaRegister() {
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
+    if (process.env.NODE_ENV !== "production") {
+      void navigator.serviceWorker.getRegistrations().then((registrations) => Promise.all(registrations.map((item) => item.unregister())));
+      return;
+    }
     let registration: ServiceWorkerRegistration | undefined;
     let restoredTimer: number | undefined;
     const initialNetworkTimer = window.setTimeout(() => setNetworkState(navigator.onLine ? "online" : "offline"), 0);
