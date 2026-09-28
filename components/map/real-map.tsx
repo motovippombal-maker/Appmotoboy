@@ -156,7 +156,9 @@ export function RealMap({
     const select = (event: { latlng: { lat: number; lng: number } }) =>
       onPickRef.current?.({ lat: event.latlng.lat, lng: event.latlng.lng, label: "Ponto selecionado" });
     map.on("click", select);
-    return () => map.off("click", select);
+    return () => {
+      map.off("click", select);
+    };
   }, [mapReady]);
 
   useEffect(() => {
