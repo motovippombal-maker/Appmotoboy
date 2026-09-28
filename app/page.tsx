@@ -5,25 +5,54 @@ import Image from "next/image";
 import {
   Activity,
   Bell,
+  Banknote,
   Bike,
+  Building2,
+  Bus,
+  Calculator,
   Check,
   ChevronRight,
   CircleDollarSign,
   Clock3,
   CreditCard,
   Crosshair,
+  Dumbbell,
+  Fuel,
   Gauge,
+  GraduationCap,
   Headphones,
+  History,
+  Home as HomeIcon,
+  Hotel,
+  Layers,
+  Landmark,
   LockKeyhole,
   MapPin,
+  Menu,
   MessageCircle,
   Navigation,
+  Pill,
   Phone,
   Route,
+  Search,
+  Settings2,
   ShieldCheck,
+  ShoppingCart,
   Star,
+  Store,
+  Ticket,
+  TreePine,
+  Trophy,
+  Trash2,
+  Utensils,
+  GripVertical,
+  Church,
+  Pencil,
+  UserRound,
   Users,
   Wallet,
+  Wifi,
+  WifiOff,
   X,
 } from "lucide-react";
 import { AuthPortal } from "@/components/auth/auth-portal";
@@ -35,6 +64,7 @@ import {
   useMotoVip,
   type FareConfig,
   type NearbyDriver,
+  type QuickPlace,
   type Ride,
 } from "@/hooks/use-moto-vip";
 
@@ -113,16 +143,66 @@ function paymentLabel(status?: string) {
   );
 }
 
+const QUICK_PLACE_ICONS = [
+  { value: "hospital", label: "Hospital/UPA", icon: Activity },
+  { value: "education", label: "Escola/Faculdade", icon: GraduationCap },
+  { value: "bus", label: "Rodoviária", icon: Bus },
+  { value: "government", label: "Prefeitura/órgão público", icon: Building2 },
+  { value: "market", label: "Mercado", icon: ShoppingCart },
+  { value: "pharmacy", label: "Farmácia", icon: Pill },
+  { value: "square", label: "Praça", icon: TreePine },
+  { value: "fuel", label: "Posto", icon: Fuel },
+  { value: "bank", label: "Banco", icon: Landmark },
+  { value: "atm", label: "Caixa eletrônico", icon: Banknote },
+  { value: "restaurant", label: "Restaurante", icon: Utensils },
+  { value: "hotel", label: "Hotel", icon: Hotel },
+  { value: "church", label: "Igreja", icon: Church },
+  { value: "sports", label: "Campo/quadra", icon: Trophy },
+  { value: "gym", label: "Academia", icon: Dumbbell },
+  { value: "store", label: "Loja", icon: Store },
+  { value: "bike", label: "Moto VIP", icon: Bike },
+  { value: "pin", label: "Local genérico", icon: MapPin },
+] as const;
+
+const QUICK_PLACE_CATEGORIES: Array<{ value: QuickPlace["category"] | "all"; label: string }> = [
+  { value: "all", label: "Todos" },
+  { value: "hospital", label: "Saúde" },
+  { value: "education", label: "Educação" },
+  { value: "bus_station", label: "Transporte" },
+  { value: "government", label: "Serviços públicos" },
+  { value: "market", label: "Mercados" },
+  { value: "pharmacy", label: "Farmácias" },
+  { value: "square", label: "Praças" },
+  { value: "fuel", label: "Postos" },
+  { value: "bank", label: "Bancos" },
+  { value: "atm", label: "Caixas" },
+  { value: "restaurant", label: "Restaurantes" },
+  { value: "hotel", label: "Hotéis" },
+  { value: "church", label: "Igrejas" },
+  { value: "sports", label: "Esportes" },
+  { value: "gym", label: "Academias" },
+  { value: "store", label: "Lojas" },
+  { value: "moto_vip", label: "Moto VIP" },
+  { value: "generic", label: "Outros" },
+];
+
+function QuickPlaceIcon({ name, color }: { name: QuickPlace["icon"]; color?: string }) {
+  const entry = QUICK_PLACE_ICONS.find((item) => item.value === name) || QUICK_PLACE_ICONS.at(-1)!;
+  const Icon = entry.icon;
+  return <Icon style={color ? { color } : undefined} aria-hidden="true" />;
+}
+
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
-    <div className="brand-lockup" aria-label="Moto VIP">
-      <span className="brand-mark">
-        <Bike aria-hidden="true" />
-      </span>
-      <span className="brand-name">
-        MOTO <b>VIP</b>
-        {!compact && <small>RIBEIRA DO POMBAL</small>}
-      </span>
+    <div className={`brand-lockup ${compact ? "compact" : ""}`} aria-label="GoSyXP · Moto VIP">
+      <Image
+        className="brand-logo-image"
+        src="/gosyxp-logo.png"
+        alt="GoSyXP — Ideias que entregam resultados"
+        width={320}
+        height={107}
+        priority
+      />
     </div>
   );
 }
@@ -214,6 +294,7 @@ function MapCanvas({
   nearbyDrivers = [],
   route = [],
   admin = false,
+  connected = true,
 }: {
   origin?: LivePoint;
   destination?: LivePoint;
@@ -221,6 +302,7 @@ function MapCanvas({
   nearbyDrivers?: NearbyDriver[];
   route?: Array<[number, number]>;
   admin?: boolean;
+  connected?: boolean;
 }) {
   const [locationStatus, setLocationStatus] = useState(
     "Usar minha localização",
@@ -262,6 +344,12 @@ function MapCanvas({
         }))}
         route={route}
       />
+      {!admin && (
+        <div className={`connection-pill ${connected ? "online" : "offline"}`} role="status">
+          {connected ? <Wifi /> : <WifiOff />}
+          <span>{connected ? "Conectado ao Moto VIP" : "Reconectando ao Moto VIP"}</span>
+        </div>
+      )}
       <div className="map-tools">
         <button
           aria-label={locationStatus}
@@ -270,7 +358,7 @@ function MapCanvas({
         >
           <Crosshair />
         </button>
-        <span className="map-provider">OPENSTREETMAP · ROTA REAL</span>
+        <span className="map-provider"><Layers /> OPENSTREETMAP · MAPA REAL</span>
       </div>
     </div>
   );
@@ -282,12 +370,20 @@ function AddressField({
   value,
   onChange,
   accent,
+  placeholder = "Digite um endereço",
+  action,
+  actionLabel,
+  inputId,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   onChange: (value: string) => void;
   accent?: boolean;
+  placeholder?: string;
+  action?: () => void;
+  actionLabel?: string;
+  inputId?: string;
 }) {
   return (
     <label className={`address-field ${accent ? "accent" : ""}`}>
@@ -295,14 +391,21 @@ function AddressField({
       <span className="field-copy">
         <small>{label}</small>
         <input
+          id={inputId}
           required
           value={value}
-          placeholder="Digite um endereço"
+          placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
           aria-label={label}
         />
       </span>
-      <ChevronRight className="field-chevron" />
+      {action ? (
+        <button type="button" className="field-action" onClick={action} aria-label={actionLabel}>
+          {accent ? <Search /> : <Crosshair />}
+        </button>
+      ) : (
+        <ChevronRight className="field-chevron" />
+      )}
     </label>
   );
 }
@@ -342,7 +445,7 @@ function rideStage(ride: Ride | null, hasEstimate: boolean) {
   return "draft";
 }
 
-function NotificationsPanel({ backend }: { backend: Backend }) {
+function NotificationsPanel({ backend, id }: { backend: Backend; id?: string }) {
   const [pushMessage, setPushMessage] = useState("");
   async function enablePush() {
     setPushMessage("");
@@ -358,7 +461,7 @@ function NotificationsPanel({ backend }: { backend: Backend }) {
     }
   }
   return (
-    <details className="notification-panel">
+    <details className="notification-panel" id={id}>
       <summary>
         <span>
           <Bell /> Notificações
@@ -415,6 +518,23 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   const [nearbyDrivers, setNearbyDrivers] = useState<NearbyDriver[]>([]);
   const [ratingScore, setRatingScore] = useState(5);
   const [ratingComment, setRatingComment] = useState("");
+  const [selectedQuickPlace, setSelectedQuickPlace] = useState<QuickPlace | null>(null);
+  const [quickPlacesOpen, setQuickPlacesOpen] = useState(false);
+  const [quickPlaceSearch, setQuickPlaceSearch] = useState("");
+  const [quickPlaceCategory, setQuickPlaceCategory] = useState<QuickPlace["category"] | "all">("all");
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
+  useEffect(() => {
+    const online = () => setIsOnline(true);
+    const offline = () => setIsOnline(false);
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
+    return () => {
+      window.removeEventListener("online", online);
+      window.removeEventListener("offline", offline);
+    };
+  }, []);
   const ride = backend.activeRide || backend.completedRide;
   const stage =
     backend.completedRide && !backend.activeRide
@@ -457,6 +577,42 @@ function PassengerPanel({ backend }: { backend: Backend }) {
     : undefined;
   const payment = completedEntry?.payment;
   const rating = completedEntry?.rating;
+  const quickPlaces = backend.quickPlaces || [];
+  const featuredQuickPlaces = quickPlaces.filter((place) => place.active && place.featured).slice(0, 6);
+  const visibleQuickPlaces = quickPlaces.filter((place) => {
+    if (!place.active) return false;
+    if (quickPlaceCategory !== "all" && place.category !== quickPlaceCategory) return false;
+    const search = quickPlaceSearch.trim().toLocaleLowerCase("pt-BR");
+    return !search || `${place.name} ${place.address}`.toLocaleLowerCase("pt-BR").includes(search);
+  });
+
+  async function useCurrentLocation() {
+    setNotice("");
+    try {
+      await gpsPosition();
+      setOriginAddress("Localização atual");
+      setNotice("Localização atual pronta para o cálculo da rota.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Não foi possível acessar o GPS.");
+    }
+  }
+
+  function chooseQuickPlace(place: QuickPlace) {
+    setSelectedQuickPlace(place);
+    setDestinationAddress(place.address);
+    setEstimate(null);
+    setQuickPlacesOpen(false);
+    setNotice(`${place.name} definido como destino. Toque em “Ver valor da corrida” para calcular a rota.`);
+    requestAnimationFrame(() => document.getElementById("destination-address")?.focus());
+  }
+
+  function openPanel(id: string) {
+    const panel = document.getElementById(id) as HTMLDetailsElement | null;
+    if (panel) {
+      panel.open = true;
+      panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }
 
   async function calculate() {
     if (!destinationAddress.trim()) {
@@ -478,7 +634,9 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           lat: position?.coords.latitude,
           lng: position?.coords.longitude,
         },
-        destination: { address: destinationAddress },
+        destination: selectedQuickPlace
+          ? { address: selectedQuickPlace.address, lat: selectedQuickPlace.latitude, lng: selectedQuickPlace.longitude }
+          : { address: destinationAddress },
       });
       const nearby = await backend.findNearbyDrivers(result.origin);
       setEstimate(result);
@@ -582,7 +740,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
     stage === "draft"
       ? [
           "Pronto para ir?",
-          "Peça seu Moto VIP",
+          "Peça sua moto",
           "Informe o destino para calcular sua corrida.",
         ]
       : stage === "quote"
@@ -628,6 +786,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           destination={destination}
           nearbyDrivers={nearbyDrivers}
           route={route}
+          connected={isOnline && backend.realtimeStatus !== "CLOSED"}
           driver={
             backend.driverLocation
               ? {
@@ -647,6 +806,9 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             <h1>{status[1]}</h1>
             <p>{status[2]}</p>
           </div>
+          {stage === "draft" && (
+            <div className="rider-watermark" aria-hidden="true"><Bike /></div>
+          )}
           {stage === "searching" && (
             <span className="search-pulse">
               <i />
@@ -666,14 +828,54 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                 label="Onde você está?"
                 value={originAddress}
                 onChange={setOriginAddress}
+                placeholder="Usar minha localização atual"
+                action={useCurrentLocation}
+                actionLabel="Detectar minha localização"
+                inputId="origin-address"
               />
               <AddressField
                 icon={<Navigation />}
                 label="Para onde você vai?"
                 value={destinationAddress}
-                onChange={setDestinationAddress}
+                onChange={(value) => {
+                  setDestinationAddress(value);
+                  setSelectedQuickPlace(null);
+                  setEstimate(null);
+                }}
+                placeholder="Digite um endereço ou selecione um ponto"
+                action={() => document.getElementById("destination-address")?.focus()}
+                actionLabel="Pesquisar destino"
+                inputId="destination-address"
                 accent
               />
+            </div>
+            <div className="quick-place-section">
+              <div className="quick-place-heading">
+                <b>Pontos rápidos de Ribeira do Pombal</b>
+                <button type="button" onClick={() => setQuickPlacesOpen(true)}>Ver mais <ChevronRight /></button>
+              </div>
+              {backend.quickPlacesLoading ? (
+                <div className="quick-place-state">Carregando pontos rápidos…</div>
+              ) : featuredQuickPlaces.length ? (
+                <div className="quick-places" aria-label="Destinos rápidos">
+                  {featuredQuickPlaces.map((place) => (
+                    <button
+                      type="button"
+                      key={place.id}
+                      className="quick-place"
+                      onClick={() => chooseQuickPlace(place)}
+                      title={place.address}
+                    >
+                      <QuickPlaceIcon name={place.icon} color={place.color} />
+                      <span>{place.name}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="quick-place-state error">
+                  {backend.quickPlacesError || "Nenhum ponto rápido disponível"}
+                </div>
+              )}
             </div>
             {estimate && (
               <div className="quote-card">
@@ -713,6 +915,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
               className="primary-cta"
               onClick={estimate ? requestRide : calculate}
             >
+              {!busy && !estimate && <Calculator />}
               {busy
                 ? "AGUARDE…"
                 : estimate
@@ -720,6 +923,19 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                   : "VER VALOR DA CORRIDA"}
               <ChevronRight />
             </Button>
+            {stage === "draft" && (
+              <div className="home-shortcuts" aria-label="Atalhos">
+                <button type="button" onClick={() => openPanel("passenger-history")}>
+                  <History /><span><b>Minhas corridas</b><small>Ver histórico</small></span><ChevronRight />
+                </button>
+                <button type="button" onClick={() => openPanel("passenger-notifications")}>
+                  <Bell /><span><b>Notificações</b><small>Novidades</small></span><ChevronRight />
+                </button>
+                <button type="button" onClick={() => setNotice("Perfil e suporte estão disponíveis no menu da conta.")}>
+                  <Settings2 /><span><b>Mais opções</b><small>Perfil e suporte</small></span><ChevronRight />
+                </button>
+              </div>
+            )}
           </>
         )}
         {stage === "searching" && (
@@ -937,7 +1153,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           </>
         )}
         {stage === "draft" && (
-          <details className="history-panel">
+          <details className="history-panel" id="passenger-history">
             <summary>
               MINHAS CORRIDAS <span>{backend.passengerHistory.length}</span>
             </summary>
@@ -985,8 +1201,55 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             </div>
           </details>
         )}
-        {stage === "draft" && <NotificationsPanel backend={backend} />}
+        {stage === "draft" && <NotificationsPanel backend={backend} id="passenger-notifications" />}
       </section>
+      <nav className="passenger-bottom-nav" aria-label="Navegação principal">
+        <button type="button" className="active" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
+          <HomeIcon /><span>Início</span>
+        </button>
+        <button type="button" onClick={() => document.getElementById("destination-address")?.focus()}>
+          <Bike /><span>Pedir corrida</span>
+        </button>
+        <button type="button" onClick={() => setNotice("Nenhum cupom disponível no momento.")}>
+          <Ticket /><span>Cupons</span>
+        </button>
+        <button type="button" onClick={() => setNotice("Use o menu da conta no topo para acessar seu perfil.")}>
+          <UserRound /><span>Conta</span>
+        </button>
+      </nav>
+      {quickPlacesOpen && (
+        <div className="quick-places-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setQuickPlacesOpen(false)}>
+          <section className="quick-places-sheet" role="dialog" aria-modal="true" aria-labelledby="quick-places-title">
+            <div className="quick-places-sheet-handle" />
+            <header>
+              <div><span>DESTINOS DA CIDADE</span><h2 id="quick-places-title">Todos os pontos rápidos</h2></div>
+              <button type="button" onClick={() => setQuickPlacesOpen(false)} aria-label="Fechar pontos rápidos"><X /></button>
+            </header>
+            <label className="quick-place-search">
+              <Search />
+              <input value={quickPlaceSearch} onChange={(event) => setQuickPlaceSearch(event.target.value)} placeholder="Buscar um local" autoFocus />
+            </label>
+            <div className="quick-place-filters" aria-label="Filtrar por categoria">
+              {QUICK_PLACE_CATEGORIES.filter((category) => category.value === "all" || quickPlaces.some((place) => place.active && place.category === category.value)).map((category) => (
+                <button type="button" key={category.value} className={quickPlaceCategory === category.value ? "active" : ""} onClick={() => setQuickPlaceCategory(category.value)}>{category.label}</button>
+              ))}
+            </div>
+            <div className="quick-place-catalog">
+              {backend.quickPlacesLoading ? (
+                <div className="quick-place-catalog-empty">Carregando pontos rápidos…</div>
+              ) : visibleQuickPlaces.length ? visibleQuickPlaces.map((place) => (
+                <button type="button" key={place.id} onClick={() => chooseQuickPlace(place)}>
+                  <span className="catalog-place-icon" style={{ backgroundColor: `${place.color}18` }}><QuickPlaceIcon name={place.icon} color={place.color} /></span>
+                  <span><b>{place.name}</b><small>{place.address}</small></span>
+                  <ChevronRight />
+                </button>
+              )) : (
+                <div className="quick-place-catalog-empty">{backend.quickPlacesError || "Nenhum ponto rápido disponível"}</div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -1609,6 +1872,25 @@ function AdminPanel({ backend }: { backend: Backend }) {
   const finance = backend.adminFinance;
   const [busyId, setBusyId] = useState("");
   const [notice, setNotice] = useState("");
+  const emptyQuickPlaceForm = {
+    id: "",
+    name: "",
+    address: "",
+    latitude: "",
+    longitude: "",
+    category: "generic" as QuickPlace["category"],
+    icon: "pin" as QuickPlace["icon"],
+    color: "#f2ad00",
+    active: true,
+    featured: false,
+    sortOrder: String((backend.quickPlaces.length + 1) * 10),
+  };
+  const [quickPlaceForm, setQuickPlaceForm] = useState(emptyQuickPlaceForm);
+  const [quickPlaceOrder, setQuickPlaceOrder] = useState<string[] | null>(null);
+  const orderedQuickPlaces = quickPlaceOrder
+    ? quickPlaceOrder.map((id) => backend.quickPlaces.find((place) => place.id === id)).filter((place): place is QuickPlace => Boolean(place))
+    : backend.quickPlaces;
+  const [draggedPlaceId, setDraggedPlaceId] = useState("");
   const [fareForm, setFareForm] = useState(() => {
     const fare = backend.fareConfig;
     return {
@@ -1701,6 +1983,109 @@ function AdminPanel({ backend }: { backend: Backend }) {
       setBusyId("");
     }
   }
+  async function locateQuickPlace() {
+    if (quickPlaceForm.address.trim().length < 5) {
+      setNotice("Informe o endereço antes de localizar no mapa.");
+      return;
+    }
+    setBusyId("quick-geocode");
+    setNotice("");
+    try {
+      const result = await backend.geocodeQuickPlace(quickPlaceForm.address);
+      setQuickPlaceForm((current) => ({
+        ...current,
+        address: result.address,
+        latitude: String(result.latitude),
+        longitude: String(result.longitude),
+      }));
+      setNotice("Endereço localizado. Confira as coordenadas e salve o ponto.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Não foi possível localizar o endereço.");
+    } finally {
+      setBusyId("");
+    }
+  }
+  function editQuickPlace(place: QuickPlace) {
+    setQuickPlaceForm({
+      id: place.id,
+      name: place.name,
+      address: place.address,
+      latitude: String(place.latitude),
+      longitude: String(place.longitude),
+      category: place.category,
+      icon: place.icon,
+      color: place.color,
+      active: place.active,
+      featured: place.featured,
+      sortOrder: String(place.sort_order),
+    });
+    document.getElementById("quick-place-editor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  async function saveQuickPlace(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusyId("quick-place-save");
+    setNotice("");
+    try {
+      await backend.saveQuickPlace({
+        id: quickPlaceForm.id || undefined,
+        name: quickPlaceForm.name,
+        address: quickPlaceForm.address,
+        latitude: Number(quickPlaceForm.latitude),
+        longitude: Number(quickPlaceForm.longitude),
+        category: quickPlaceForm.category,
+        icon: quickPlaceForm.icon,
+        color: quickPlaceForm.color,
+        active: quickPlaceForm.active,
+        featured: quickPlaceForm.featured,
+        sortOrder: Number(quickPlaceForm.sortOrder),
+      });
+      await backend.refresh();
+      setQuickPlaceForm({ ...emptyQuickPlaceForm, sortOrder: String((backend.quickPlaces.length + 2) * 10) });
+      setNotice(quickPlaceForm.id ? "Ponto rápido atualizado." : "Ponto rápido cadastrado.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Não foi possível salvar o ponto rápido.");
+    } finally {
+      setBusyId("");
+    }
+  }
+  async function deleteQuickPlace(place: QuickPlace) {
+    if (!window.confirm(`Excluir “${place.name}”? Essa ação não poderá ser desfeita.`)) return;
+    setBusyId(`quick-delete-${place.id}`);
+    setNotice("");
+    try {
+      await backend.deleteQuickPlace(place.id);
+      await backend.refresh();
+      if (quickPlaceForm.id === place.id) setQuickPlaceForm(emptyQuickPlaceForm);
+      setNotice("Ponto rápido excluído.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Não foi possível excluir o ponto rápido.");
+    } finally {
+      setBusyId("");
+    }
+  }
+  async function dropQuickPlace(targetId: string) {
+    if (!draggedPlaceId || draggedPlaceId === targetId) return;
+    const next = [...orderedQuickPlaces];
+    const from = next.findIndex((place) => place.id === draggedPlaceId);
+    const to = next.findIndex((place) => place.id === targetId);
+    if (from < 0 || to < 0) return;
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setQuickPlaceOrder(next.map((place) => place.id));
+    setDraggedPlaceId("");
+    setBusyId("quick-order");
+    try {
+      await backend.reorderQuickPlaces(next.map((place) => place.id));
+      await backend.refresh();
+      setQuickPlaceOrder(null);
+      setNotice("Ordem dos pontos rápidos atualizada.");
+    } catch (error) {
+      setQuickPlaceOrder(null);
+      setNotice(error instanceof Error ? error.message : "Não foi possível atualizar a ordem.");
+    } finally {
+      setBusyId("");
+    }
+  }
   const approvalLabel = (status: string) =>
     status === "approved"
       ? "Aprovado"
@@ -1728,6 +2113,9 @@ function AdminPanel({ backend }: { backend: Backend }) {
           </button>
           <button>
             <Wallet /> Financeiro
+          </button>
+          <button onClick={() => document.getElementById("quick-places-admin")?.scrollIntoView({ behavior: "smooth" })}>
+            <MapPin /> Pontos rápidos
           </button>
           <button>
             <Headphones /> Suporte
@@ -1827,6 +2215,58 @@ function AdminPanel({ backend }: { backend: Backend }) {
               </div>
             </div>
           </article>
+        </section>
+        <section className="quick-places-admin-card" id="quick-places-admin">
+          <div className="card-title">
+            <div>
+              <span>DESTINOS</span>
+              <h2>Pontos rápidos</h2>
+            </div>
+            <em className="approval-status approved">{backend.quickPlaces.filter((place) => place.active).length} ativos</em>
+          </div>
+          <p>Cadastre locais da cidade, escolha os destaques da Home e arraste os itens para mudar a ordem.</p>
+          {backend.quickPlacesError && <div className="auth-message">{backend.quickPlacesError}</div>}
+          <div className="quick-places-admin-grid">
+            <form id="quick-place-editor" className="quick-place-form" onSubmit={saveQuickPlace}>
+              <div className="quick-place-form-title">
+                <div><b>{quickPlaceForm.id ? "Editar ponto" : "Novo ponto rápido"}</b><small>Os campos com coordenadas são usados diretamente na rota.</small></div>
+                {quickPlaceForm.id && <button type="button" onClick={() => setQuickPlaceForm(emptyQuickPlaceForm)}>Cancelar edição</button>}
+              </div>
+              <div className="quick-place-fields">
+                <label><span>Nome do local</span><input required maxLength={100} value={quickPlaceForm.name} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, name: event.target.value }))} placeholder="Hospital Municipal" /></label>
+                <label className="wide"><span>Endereço completo</span><div className="address-geocode"><input required maxLength={240} value={quickPlaceForm.address} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, address: event.target.value }))} placeholder="Rua, número, bairro, Ribeira do Pombal - BA" /><button type="button" onClick={locateQuickPlace} disabled={busyId === "quick-geocode"}><Crosshair /> {busyId === "quick-geocode" ? "Localizando…" : "Localizar"}</button></div></label>
+                <label><span>Latitude</span><input required type="number" step="any" min="-90" max="90" value={quickPlaceForm.latitude} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, latitude: event.target.value }))} /></label>
+                <label><span>Longitude</span><input required type="number" step="any" min="-180" max="180" value={quickPlaceForm.longitude} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, longitude: event.target.value }))} /></label>
+                <label><span>Categoria</span><select value={quickPlaceForm.category} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, category: event.target.value as QuickPlace["category"] }))}>{QUICK_PLACE_CATEGORIES.filter((item) => item.value !== "all").map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
+                <label><span>Ordem</span><input required type="number" min="0" max="100000" value={quickPlaceForm.sortOrder} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, sortOrder: event.target.value }))} /></label>
+                <label className="color-field"><span>Cor do ícone</span><div><input type="color" value={quickPlaceForm.color} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, color: event.target.value }))} /><input required pattern="^#[0-9A-Fa-f]{6}$" value={quickPlaceForm.color} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, color: event.target.value }))} /></div></label>
+              </div>
+              <fieldset className="icon-library">
+                <legend>Biblioteca de ícones</legend>
+                {QUICK_PLACE_ICONS.map((item) => {
+                  const Icon = item.icon;
+                  return <button type="button" key={item.value} className={quickPlaceForm.icon === item.value ? "active" : ""} onClick={() => setQuickPlaceForm((current) => ({ ...current, icon: item.value }))} title={item.label}><Icon /><span>{item.label}</span></button>;
+                })}
+              </fieldset>
+              <div className="quick-place-options">
+                <label><input type="checkbox" checked={quickPlaceForm.active} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, active: event.target.checked }))} /> Ativo</label>
+                <label><input type="checkbox" checked={quickPlaceForm.featured} onChange={(event) => setQuickPlaceForm((current) => ({ ...current, featured: event.target.checked }))} /> ⭐ Exibir na tela inicial</label>
+              </div>
+              <Button disabled={busyId === "quick-place-save"}>{busyId === "quick-place-save" ? "SALVANDO…" : quickPlaceForm.id ? "SALVAR ALTERAÇÕES" : "CADASTRAR PONTO"}</Button>
+            </form>
+            <div className="quick-place-admin-list">
+              <div className="quick-place-list-title"><div><b>Pontos cadastrados</b><small>Arraste pelo ícone para reordenar</small></div>{busyId === "quick-order" && <span>Salvando ordem…</span>}</div>
+              {backend.quickPlacesLoading ? <div className="quick-place-state">Carregando…</div> : orderedQuickPlaces.length ? orderedQuickPlaces.map((place) => (
+                <article key={place.id} draggable onDragStart={() => setDraggedPlaceId(place.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => void dropQuickPlace(place.id)} className={draggedPlaceId === place.id ? "dragging" : ""}>
+                  <GripVertical className="drag-handle" />
+                  <span className="admin-place-icon" style={{ backgroundColor: `${place.color}18` }}><QuickPlaceIcon name={place.icon} color={place.color} /></span>
+                  <div><b>{place.featured ? "⭐ " : ""}{place.name}</b><small>{place.address}</small><em>{QUICK_PLACE_CATEGORIES.find((item) => item.value === place.category)?.label || place.category} · {place.active ? "Ativo" : "Inativo"}</em></div>
+                  <button type="button" onClick={() => editQuickPlace(place)} aria-label={`Editar ${place.name}`}><Pencil /></button>
+                  <button type="button" className="delete" disabled={busyId === `quick-delete-${place.id}`} onClick={() => void deleteQuickPlace(place)} aria-label={`Excluir ${place.name}`}><Trash2 /></button>
+                </article>
+              )) : <div className="quick-place-state">Nenhum ponto rápido cadastrado.</div>}
+            </div>
+          </div>
         </section>
         <section className="region-fares-card">
           <div className="card-title">
@@ -2180,30 +2620,51 @@ export default function Home() {
       />
     );
   return (
-    <Tabs value={role} className="app-root">
+    <Tabs value={role} className={`app-root app-role-${role}`}>
       <header className="topbar">
+        {role === "passenger" && (
+          <details className="mobile-menu">
+            <summary aria-label="Abrir menu"><Menu /></summary>
+            <nav>
+              <a href="#destination-address"><Bike /> Pedir corrida</a>
+              <a href="#passenger-history"><History /> Minhas corridas</a>
+              <a href="#passenger-notifications"><Bell /> Notificações</a>
+              <a href="mailto:suporte@motovip.app"><Headphones /> Suporte</a>
+            </nav>
+          </details>
+        )}
         <Brand />
-        <TabsList className="role-switch" aria-label="Ambiente autorizado">
-          {backend.profile?.role === "passenger" && (
-            <TabsTrigger value="passenger">
-              <MapPin /> Passageiro
-            </TabsTrigger>
-          )}
-          {backend.profile?.role === "driver" && (
-            <TabsTrigger value="driver">
-              <Bike /> Motoboy
-            </TabsTrigger>
-          )}
-          {backend.profile?.role === "admin" && (
-            <TabsTrigger value="admin">
-              <Gauge /> Central
-            </TabsTrigger>
-          )}
-        </TabsList>
-        <div className="account-actions">
-          <span>{backend.profile?.full_name || contextLabel}</span>
-          <button onClick={() => backend.signOut()}>Sair</button>
-        </div>
+        {role === "passenger" ? (
+          <>
+            <nav className="passenger-top-nav" aria-label="Navegação do passageiro">
+              <a className="active" href="#destination-address"><HomeIcon /> Início</a>
+              <a href="#passenger-history"><History /> Minhas corridas</a>
+              <button type="button"><Ticket /> Cupons</button>
+              <a href="#passenger-notifications"><Bell /> Notificações{backend.unreadNotifications > 0 && <b>{backend.unreadNotifications}</b>}</a>
+              <a href="mailto:suporte@motovip.app"><Headphones /> Suporte</a>
+            </nav>
+            <button className="header-location" type="button" onClick={() => document.querySelector<HTMLButtonElement>(".field-action")?.click()}>
+              <MapPin /><span>Minha localização</span>
+            </button>
+          </>
+        ) : (
+          <TabsList className="role-switch" aria-label="Ambiente autorizado">
+            {backend.profile?.role === "driver" && (
+              <TabsTrigger value="driver"><Bike /> Motoboy</TabsTrigger>
+            )}
+            {backend.profile?.role === "admin" && (
+              <TabsTrigger value="admin"><Gauge /> Central</TabsTrigger>
+            )}
+          </TabsList>
+        )}
+        <details className="account-actions">
+          <summary aria-label="Abrir menu da conta">
+            <span className="account-avatar"><UserRound /></span>
+            <span className="account-copy"><b>{backend.profile?.full_name || contextLabel}</b><small>{contextLabel}</small></span>
+            <ChevronRight />
+          </summary>
+          <div><button onClick={() => backend.signOut()}>Sair da conta</button></div>
+        </details>
       </header>
       {backend.error && <div className="backend-warning">{backend.error}</div>}
       <TabsContent value="passenger" className="screen">

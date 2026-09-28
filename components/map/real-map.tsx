@@ -5,6 +5,13 @@ import type { Map as LeafletMap, Marker, Polyline } from "leaflet";
 
 export type LivePoint = { lat: number; lng: number; label?: string };
 
+const CITY_PLACES = [
+  { lat: -10.8349, lng: -38.5402, label: "Prefeitura", symbol: "P", tone: "blue" },
+  { lat: -10.8389, lng: -38.5318, label: "Hospital", symbol: "+", tone: "red" },
+  { lat: -10.8422, lng: -38.5299, label: "Rodoviária", symbol: "R", tone: "blue" },
+  { lat: -10.8448, lng: -38.5365, label: "Praça Central", symbol: "●", tone: "green" },
+] as const;
+
 export function RealMap({ origin, destination, driver, nearbyDrivers = [], route }: { origin?: LivePoint; destination?: LivePoint; driver?: LivePoint; nearbyDrivers?: LivePoint[]; route?: Array<[number, number]> }) {
   const elementRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -19,8 +26,19 @@ export function RealMap({ origin, destination, driver, nearbyDrivers = [], route
       if (disposed || !elementRef.current) return;
       const L = module.default;
       const map = L.map(elementRef.current, { zoomControl: false, attributionControl: true }).setView([-10.8373, -38.5357], 14);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
-      L.control.zoom({ position: "topright" }).addTo(map);
+      const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
+      const contrast = L.tileLayer("https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap, Tiles HOT" });
+      const points = L.layerGroup(CITY_PLACES.map((place) => {
+        const icon = L.divIcon({
+          className: `city-place-icon ${place.tone}`,
+          html: `<span>${place.symbol}</span><b>${place.label}</b>`,
+          iconSize: [120, 34],
+          iconAnchor: [17, 17],
+        });
+        return L.marker([place.lat, place.lng], { icon }).bindTooltip(place.label);
+      })).addTo(map);
+      L.control.layers({ "Mapa": street, "Alto contraste": contrast }, { "Pontos rápidos": points }, { position: "bottomright" }).addTo(map);
+      L.control.zoom({ position: "bottomright" }).addTo(map);
       mapRef.current = map; setMapReady(true);
     });
     return () => { disposed = true; driverMarkerRef.current = null; mapRef.current?.remove(); mapRef.current = null; };

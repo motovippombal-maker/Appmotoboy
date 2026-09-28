@@ -16,6 +16,7 @@ export type AdminDriver = { profile_id: string; approval_status: string; online:
 export type AdminStats = { ridesToday: number; driversOnline: number; driversAvailable: number; averageWaitMinutes: number; revenueCents: number; recentRides: Ride[]; drivers: AdminDriver[] };
 export type FareConfig = { baseCents: number; perKmCents: number; perMinuteCents: number; minimumCents: number; configured: boolean };
 export type FareRegion = { id: string; name: string; amount_cents: number; active: boolean; is_default: boolean; updated_at: string };
+export type QuickPlace = { id: string; name: string; address: string; latitude: number; longitude: number; category: "hospital" | "education" | "bus_station" | "government" | "market" | "pharmacy" | "square" | "fuel" | "bank" | "atm" | "restaurant" | "hotel" | "church" | "sports" | "gym" | "store" | "moto_vip" | "generic"; icon: "hospital" | "education" | "bus" | "government" | "market" | "pharmacy" | "square" | "fuel" | "bank" | "atm" | "restaurant" | "hotel" | "church" | "sports" | "gym" | "store" | "bike" | "pin"; color: string; active: boolean; featured: boolean; sort_order: number; created_at?: string; updated_at: string };
 export type PaymentSummary = { ride_id?: string; id?: string; method: string; status: string; amount_cents: number; paid_at?: string | null; provider?: string | null; pix_transactions?: Array<{ qr_code?: string; qr_code_image_url?: string; expires_at?: string }> };
 export type HistoryRide = Ride & { driver_name?: string | null; passenger_name?: string | null; rating?: { score: number; comment?: string; created_at: string } | null; payment?: PaymentSummary | null };
 export type DriverHistory = { rides: HistoryRide[]; totals: { dayCents: number; weekCents: number; monthCents: number; commissionConfigured: boolean } };
@@ -35,6 +36,9 @@ export function useMotoVip() {
   const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
   const [fareConfig, setFareConfig] = useState<FareConfig | null>(null);
   const [fareRegions, setFareRegions] = useState<FareRegion[]>([]);
+  const [quickPlaces, setQuickPlaces] = useState<QuickPlace[]>([]);
+  const [quickPlacesLoading, setQuickPlacesLoading] = useState(true);
+  const [quickPlacesError, setQuickPlacesError] = useState<string | null>(null);
   const [passengerHistory, setPassengerHistory] = useState<HistoryRide[]>([]);
   const [driverHistory, setDriverHistory] = useState<DriverHistory | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -71,7 +75,7 @@ export function useMotoVip() {
 
   const refresh = useCallback(async (currentSession: Session | null) => {
     setSession(currentSession); setError(null);
-    if (!currentSession) { setProfile(null); setActiveRide(null); setCompletedRide(null); setOffers([]); setDriverState(null); setDriverAvatarUrl(null); setDriverLocation(null); setAdminStats(null); setFareConfig(null); setFareRegions([]); setPassengerHistory([]); setDriverHistory(null); setNotifications([]); setUnreadNotifications(0); setAdminFinance(null); setRealtimeStatus("closed"); setLoading(false); return; }
+    if (!currentSession) { setProfile(null); setActiveRide(null); setCompletedRide(null); setOffers([]); setDriverState(null); setDriverAvatarUrl(null); setDriverLocation(null); setAdminStats(null); setFareConfig(null); setFareRegions([]); setQuickPlaces([]); setQuickPlacesLoading(false); setQuickPlacesError(null); setPassengerHistory([]); setDriverHistory(null); setNotifications([]); setUnreadNotifications(0); setAdminFinance(null); setRealtimeStatus("closed"); setLoading(false); return; }
     const { data: foundProfile, error: profileError } = await supabase.from("profiles").select("id, role, full_name, phone, avatar_url, blocked").eq("id", currentSession.user.id).single();
     if (profileError || !foundProfile) { setProfile(null); setError("O banco do Moto VIP ainda precisa receber a migração inicial."); setLoading(false); return; }
     const typedProfile = foundProfile as Profile; setProfile(typedProfile);
@@ -95,14 +99,25 @@ export function useMotoVip() {
       setDriverHistory(history);
     }
     if (typedProfile.role === "passenger") {
-      const history = await api<{ rides: HistoryRide[] }>("/api/history/passenger");
+      setQuickPlacesLoading(true);
+      const [history, quickPlaceResult] = await Promise.all([
+        api<{ rides: HistoryRide[] }>("/api/history/passenger"),
+        api<{ places: QuickPlace[] }>("/api/quick-places").catch((quickPlaceError: unknown) => {
+          setQuickPlacesError(quickPlaceError instanceof Error ? quickPlaceError.message : "Não foi possível carregar os pontos rápidos.");
+          return { places: [] as QuickPlace[] };
+        }),
+      ]);
       setPassengerHistory(history.rides);
+      setQuickPlaces(quickPlaceResult.places);
+      if (quickPlaceResult.places.length) setQuickPlacesError(null);
+      setQuickPlacesLoading(false);
     }
     if (typedProfile.role !== "admin") {
       const inbox = await api<{ notifications: NotificationItem[]; unread: number }>("/api/notifications");
       setNotifications(inbox.notifications); setUnreadNotifications(inbox.unread);
     }
     if (typedProfile.role === "admin") {
+      setQuickPlacesLoading(true);
       const start = new Date(); start.setHours(0, 0, 0, 0);
       const [{ count: ridesToday }, { data: drivers }, { data: completed }, { data: recent }, driverDirectory, fareResult, fareRegionsResult, financeResult] = await Promise.all([
         supabase.from("rides").select("id", { count: "exact", head: true }).gte("created_at", start.toISOString()),
@@ -119,6 +134,13 @@ export function useMotoVip() {
       setFareConfig(fareResult.fare);
       setFareRegions(fareRegionsResult.regions);
       setAdminFinance(financeResult);
+      const quickPlaceResult = await api<{ places: QuickPlace[] }>("/api/admin/quick-places").catch((quickPlaceError: unknown) => {
+        setQuickPlacesError(quickPlaceError instanceof Error ? quickPlaceError.message : "Não foi possível carregar os pontos rápidos.");
+        return { places: [] as QuickPlace[] };
+      });
+      setQuickPlaces(quickPlaceResult.places);
+      if (quickPlaceResult.places.length) setQuickPlacesError(null);
+      setQuickPlacesLoading(false);
     }
     setLoading(false);
   }, [api, supabase]);
@@ -143,6 +165,7 @@ export function useMotoVip() {
       const point = payload.new as { latitude: number; longitude: number; accuracy_meters?: number; updated_at: string };
       setDriverLocation((current) => ({ lat: point.latitude, lng: point.longitude, accuracyMeters: point.accuracy_meters, updatedAt: point.updated_at, distanceToOriginMeters: current?.distanceToOriginMeters }));
     });
+    if (["passenger", "admin"].includes(profile.role)) channel = channel.on("postgres_changes", { event: "*", schema: "public", table: "quick_places" }, () => void refresh(session).catch(() => undefined));
     channel.subscribe((status) => setRealtimeStatus(status.toLowerCase()));
     return () => { void supabase.removeChannel(channel); };
   }, [activeRide?.id, profile, refresh, session, supabase]);
@@ -169,7 +192,7 @@ export function useMotoVip() {
   const updateLocation = useCallback((position: GeolocationPosition, rideId?: string) => api("/api/location", { method: "POST", body: JSON.stringify({ latitude: position.coords.latitude, longitude: position.coords.longitude, accuracyMeters: position.coords.accuracy, heading: position.coords.heading || undefined, speedMps: position.coords.speed || undefined, rideId }) }), [api]);
 
   return {
-    session, profile, activeRide, completedRide, offers, driverState, driverAvatarUrl, driverLocation, adminStats, fareConfig, fareRegions, passengerHistory, driverHistory, notifications, unreadNotifications, adminFinance, realtimeStatus, passwordRecovery, loading, error,
+    session, profile, activeRide, completedRide, offers, driverState, driverAvatarUrl, driverLocation, adminStats, fareConfig, fareRegions, quickPlaces, quickPlacesLoading, quickPlacesError, passengerHistory, driverHistory, notifications, unreadNotifications, adminFinance, realtimeStatus, passwordRecovery, loading, error,
     signIn: async (email: string, password: string) => {
       const result = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
       return { ...result, error: result.error ? { message: friendlyAuthError(result.error) } : null };
@@ -200,6 +223,10 @@ export function useMotoVip() {
     approveDriver: (driverId: string, status: "approved" | "rejected" | "blocked") => api(`/api/admin/drivers/${driverId}/approval`, { method: "POST", body: JSON.stringify({ status }) }),
     saveFareConfig: (fare: FareConfig) => api<{ fare: FareConfig }>("/api/admin/fare", { method: "POST", body: JSON.stringify(fare) }),
     saveFareRegion: (region: { id?: string; name: string; amountCents: number; active: boolean }) => api<{ region: FareRegion }>("/api/admin/fare-regions", { method: "POST", body: JSON.stringify(region) }),
+    saveQuickPlace: (place: { id?: string; name: string; address: string; latitude: number; longitude: number; category: QuickPlace["category"]; icon: QuickPlace["icon"]; color: string; active: boolean; featured: boolean; sortOrder: number }) => api<{ place: QuickPlace }>("/api/admin/quick-places", { method: "POST", body: JSON.stringify(place) }),
+    deleteQuickPlace: (id: string) => api<{ ok: true }>(`/api/admin/quick-places?id=${encodeURIComponent(id)}`, { method: "DELETE" }),
+    reorderQuickPlaces: (orderedIds: string[]) => api<{ ok: true }>("/api/admin/quick-places", { method: "PATCH", body: JSON.stringify({ orderedIds }) }),
+    geocodeQuickPlace: (address: string) => api<{ address: string; latitude: number; longitude: number }>("/api/admin/quick-places/geocode", { method: "POST", body: JSON.stringify({ address }) }),
     dismissCompletedRide: () => { dismissedCompletedRide.current = completedRide?.id || null; setCompletedRide(null); },
     updateLocation,
     rateRide: (rideId: string, score: number, comment?: string) => api("/api/ratings", { method: "POST", body: JSON.stringify({ rideId, score, comment }) }),
