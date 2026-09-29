@@ -4,6 +4,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { friendlyAuthError } from "@/lib/supabase/auth-errors";
+import {
+  newerLocation,
+  normalizeRealtimeStatus,
+  shouldResynchronizeRealtime,
+  type RealtimeConnectionState,
+} from "@/lib/tracking/realtime";
+
+export class BackendApiError extends Error {
+  constructor(
+    message: string,
+    public code: string,
+    public payload: Record<string, unknown>,
+  ) {
+    super(message);
+  }
+}
 
 export type Profile = {
   id: string;
@@ -62,9 +78,11 @@ export type AddressResult = {
   shortAddress: string;
   lat: number;
   lng: number;
+  district?: string;
   city: string;
   state: string;
   approximate: boolean;
+  provider?: "nominatim" | "photon" | "coordinates";
 };
 export type RideOffer = {
   id: string;
@@ -86,6 +104,18 @@ export type DriverLocation = {
   accuracyMeters?: number;
   updatedAt: string;
   distanceToOriginMeters?: number;
+  stale?: boolean;
+  freshnessSeconds?: number;
+  rideId?: string | null;
+};
+export type TrackingRoute = {
+  phase: "pickup" | "trip";
+  distanceMeters: number;
+  durationSeconds: number;
+  geometry: string;
+  from: { lat: number; lng: number; updatedAt: string };
+  to: { lat: number; lng: number };
+  calculatedAt: string;
 };
 export type Vehicle = {
   id?: string;
@@ -276,14 +306,23 @@ export function useMotoVip() {
   const [quickPlacesLoading, setQuickPlacesLoading] = useState(true);
   const [quickPlacesError, setQuickPlacesError] = useState<string | null>(null);
   const [passengerHistory, setPassengerHistory] = useState<HistoryRide[]>([]);
+  const [passengerHistoryLoading, setPassengerHistoryLoading] = useState(true);
+  const [passengerHistoryError, setPassengerHistoryError] = useState<string | null>(null);
   const [driverHistory, setDriverHistory] = useState<DriverHistory | null>(
     null,
   );
+  const [driverHistoryLoading, setDriverHistoryLoading] = useState(true);
+  const [driverHistoryError, setDriverHistoryError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [notificationsError, setNotificationsError] = useState<string | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [adminFinance, setAdminFinance] = useState<AdminFinance | null>(null);
   const dismissedCompletedRide = useRef<string | null>(null);
-  const [realtimeStatus, setRealtimeStatus] = useState("connecting");
+  const [realtimeStatus, setRealtimeStatus] =
+    useState<RealtimeConnectionState>("connecting");
+  const realtimeStatusRef = useRef<RealtimeConnectionState>("connecting");
+  const [nearbyRevision, setNearbyRevision] = useState(0);
   const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -315,7 +354,20 @@ export function useMotoVip() {
           typeof payload.message === "string"
             ? payload.message
             : "Não foi possível concluir a operação.";
-        throw new Error(message);
+        const errorCode =
+          typeof payload === "object" &&
+          payload !== null &&
+          "error" in payload &&
+          typeof payload.error === "string"
+            ? payload.error
+            : "REQUEST_FAILED";
+        throw new BackendApiError(
+          message,
+          errorCode,
+          typeof payload === "object" && payload !== null
+            ? (payload as Record<string, unknown>)
+            : {},
+        );
       }
       return payload as T;
     },
@@ -341,11 +393,18 @@ export function useMotoVip() {
         setQuickPlacesLoading(false);
         setQuickPlacesError(null);
         setPassengerHistory([]);
+        setPassengerHistoryLoading(false);
+        setPassengerHistoryError(null);
         setDriverHistory(null);
+        setDriverHistoryLoading(false);
+        setDriverHistoryError(null);
         setNotifications([]);
+        setNotificationsLoading(false);
+        setNotificationsError(null);
         setUnreadNotifications(0);
         setAdminFinance(null);
-        setRealtimeStatus("closed");
+        realtimeStatusRef.current = "disconnected";
+        setRealtimeStatus("disconnected");
         setLoading(false);
         return;
       }
@@ -413,13 +472,36 @@ export function useMotoVip() {
           "/api/rides/offers",
         );
         setOffers(offerResult.offers);
-        const history = await api<DriverHistory>("/api/history/driver");
-        setDriverHistory(history);
+        setDriverHistoryLoading(true);
+        setDriverHistoryError(null);
+        const history = await api<DriverHistory>("/api/history/driver").catch(
+          (historyError: unknown) => {
+            setDriverHistoryError(
+              historyError instanceof Error
+                ? historyError.message
+                : "Não foi possível carregar seu histórico.",
+            );
+            return null;
+          },
+        );
+        if (history) setDriverHistory(history);
+        setDriverHistoryLoading(false);
       }
       if (typedProfile.role === "passenger") {
         setQuickPlacesLoading(true);
+        setPassengerHistoryLoading(true);
+        setPassengerHistoryError(null);
         const [history, quickPlaceResult] = await Promise.all([
-          api<{ rides: HistoryRide[] }>("/api/history/passenger"),
+          api<{ rides: HistoryRide[] }>("/api/history/passenger").catch(
+            (historyError: unknown) => {
+              setPassengerHistoryError(
+                historyError instanceof Error
+                  ? historyError.message
+                  : "Não foi possível carregar seu histórico.",
+              );
+              return null;
+            },
+          ),
           api<{ places: QuickPlace[] }>("/api/quick-places").catch(
             (quickPlaceError: unknown) => {
               setQuickPlacesError(
@@ -431,18 +513,31 @@ export function useMotoVip() {
             },
           ),
         ]);
-        setPassengerHistory(history.rides);
+        if (history) setPassengerHistory(history.rides);
+        setPassengerHistoryLoading(false);
         setQuickPlaces(quickPlaceResult.places);
         if (quickPlaceResult.places.length) setQuickPlacesError(null);
         setQuickPlacesLoading(false);
       }
       if (typedProfile.role !== "admin") {
+        setNotificationsLoading(true);
+        setNotificationsError(null);
         const inbox = await api<{
           notifications: NotificationItem[];
           unread: number;
-        }>("/api/notifications");
-        setNotifications(inbox.notifications);
-        setUnreadNotifications(inbox.unread);
+        }>("/api/notifications").catch((notificationError: unknown) => {
+          setNotificationsError(
+            notificationError instanceof Error
+              ? notificationError.message
+              : "Não foi possível carregar as notificações.",
+          );
+          return null;
+        });
+        if (inbox) {
+          setNotifications(inbox.notifications);
+          setUnreadNotifications(inbox.unread);
+        }
+        setNotificationsLoading(false);
       }
       if (typedProfile.role === "admin") {
         setQuickPlacesLoading(true);
@@ -546,64 +641,121 @@ export function useMotoVip() {
     return () => listener.subscription.unsubscribe();
   }, [refresh, supabase]);
 
+  const profileRole = profile?.role;
+  const activeRideId = activeRide?.id;
+  const activeRideDriverId = activeRide?.driver_id;
+
   useEffect(() => {
-    if (!session || !profile) return;
+    if (!session || !profileRole) return;
+    realtimeStatusRef.current = "connecting";
+    const connectingTimer = window.setTimeout(
+      () => setRealtimeStatus("connecting"),
+      0,
+    );
     let channel = supabase
-      .channel(`moto-vip:${session.user.id}:${activeRide?.id || "idle"}`)
+      .channel(`moto-vip:${session.user.id}:${activeRideId || "idle"}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "rides" },
         () => void refresh(session).catch(() => undefined),
       );
-    if (profile.role === "driver")
+    if (profileRole === "driver")
       channel = channel.on(
         "postgres_changes",
         { event: "*", schema: "public", table: "ride_requests" },
         () => void refresh(session).catch(() => undefined),
       );
-    if (profile.role !== "admin")
+    if (profileRole !== "admin")
       channel = channel.on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "notifications" },
         () => void refresh(session).catch(() => undefined),
       );
-    if (profile.role === "passenger")
+    if (profileRole === "passenger")
       channel = channel.on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "payments" },
         () => void refresh(session).catch(() => undefined),
       );
-    if (profile.role === "passenger" && activeRide?.id)
+    if (profileRole === "passenger" && !activeRideId)
       channel = channel.on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "driver_locations" },
+        { event: "UPDATE", schema: "public", table: "drivers" },
+        (payload) => {
+          const driver = payload.new as {
+            online?: boolean;
+            available?: boolean;
+          };
+          if (
+            typeof driver.online === "boolean" &&
+            typeof driver.available === "boolean"
+          ) {
+            setNearbyRevision((value) => value + 1);
+          }
+        },
+      );
+    if (
+      (profileRole === "passenger" || profileRole === "driver") &&
+      activeRideId &&
+      activeRideDriverId
+    )
+      channel = channel.on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "driver_locations",
+          filter: `driver_id=eq.${activeRideDriverId}`,
+        },
         (payload) => {
           const point = payload.new as {
+            driver_id: string;
+            ride_id?: string | null;
             latitude: number;
             longitude: number;
             accuracy_meters?: number;
             updated_at: string;
           };
-          setDriverLocation((current) => ({
+          const incoming: DriverLocation = {
             lat: point.latitude,
             lng: point.longitude,
             accuracyMeters: point.accuracy_meters,
             updatedAt: point.updated_at,
-            distanceToOriginMeters: current?.distanceToOriginMeters,
-          }));
+            rideId: point.ride_id,
+          };
+          setDriverLocation((current) => {
+            const next = newerLocation(current, incoming, activeRideId);
+            return next === incoming
+              ? {
+                  ...incoming,
+                  stale: false,
+                  freshnessSeconds: current?.freshnessSeconds,
+                }
+              : current;
+          });
         },
       );
-    if (["passenger", "admin"].includes(profile.role))
+    if (["passenger", "admin"].includes(profileRole))
       channel = channel.on(
         "postgres_changes",
         { event: "*", schema: "public", table: "quick_places" },
         () => void refresh(session).catch(() => undefined),
       );
-    channel.subscribe((status) => setRealtimeStatus(status.toLowerCase()));
+    channel.subscribe((status) => {
+      window.clearTimeout(connectingTimer);
+      const next = normalizeRealtimeStatus(status);
+      const previous = realtimeStatusRef.current;
+      realtimeStatusRef.current = next;
+      setRealtimeStatus(next);
+      if (shouldResynchronizeRealtime(previous, next)) {
+        void refresh(session).catch(() => undefined);
+      }
+    });
     return () => {
+      window.clearTimeout(connectingTimer);
       void supabase.removeChannel(channel);
     };
-  }, [activeRide?.id, profile, refresh, session, supabase]);
+  }, [activeRideDriverId, activeRideId, profileRole, refresh, session, supabase]);
 
   useEffect(() => {
     if (!session || !profile || profile.role === "admin") return;
@@ -612,7 +764,7 @@ export function useMotoVip() {
         if (!document.hidden && navigator.onLine)
           void refresh(session).catch(() => undefined);
       },
-      realtimeStatus === "subscribed" ? 30000 : 5000,
+      realtimeStatus === "connected" ? 30000 : 10000,
     );
     return () => window.clearInterval(interval);
   }, [profile, realtimeStatus, refresh, session]);
@@ -642,6 +794,7 @@ export function useMotoVip() {
           heading: position.coords.heading || undefined,
           speedMps: position.coords.speed || undefined,
           rideId,
+          recordedAt: new Date(position.timestamp).toISOString(),
         }),
       }),
     [api],
@@ -663,11 +816,18 @@ export function useMotoVip() {
     quickPlacesLoading,
     quickPlacesError,
     passengerHistory,
+    passengerHistoryLoading,
+    passengerHistoryError,
     driverHistory,
+    driverHistoryLoading,
+    driverHistoryError,
     notifications,
+    notificationsLoading,
+    notificationsError,
     unreadNotifications,
     adminFinance,
     realtimeStatus,
+    nearbyRevision,
     passwordRecovery,
     loading,
     error,
@@ -761,7 +921,10 @@ export function useMotoVip() {
         discountCents: number;
         coupon: { code: string; description: string | null } | null;
         fareRegion: { id: string; name: string; isDefault: boolean };
+        serviceArea: { id: string; name: string };
         pricingMode: "region";
+        quoteToken: string;
+        quoteExpiresAt: string;
       }>("/api/maps/estimate", {
         method: "POST",
         body: JSON.stringify(payload),
@@ -785,6 +948,61 @@ export function useMotoVip() {
         method: "POST",
         body: JSON.stringify(origin),
       }),
+    trackingRoute: (rideId: string) =>
+      api<TrackingRoute>(`/api/rides/${rideId}/tracking-route`),
+    reloadPassengerHistory: async () => {
+      setPassengerHistoryLoading(true);
+      setPassengerHistoryError(null);
+      try {
+        const result = await api<{ rides: HistoryRide[] }>(
+          "/api/history/passenger",
+        );
+        setPassengerHistory(result.rides);
+      } catch (historyError) {
+        setPassengerHistoryError(
+          historyError instanceof Error
+            ? historyError.message
+            : "Não foi possível carregar seu histórico.",
+        );
+      } finally {
+        setPassengerHistoryLoading(false);
+      }
+    },
+    reloadDriverHistory: async () => {
+      setDriverHistoryLoading(true);
+      setDriverHistoryError(null);
+      try {
+        setDriverHistory(await api<DriverHistory>("/api/history/driver"));
+      } catch (historyError) {
+        setDriverHistoryError(
+          historyError instanceof Error
+            ? historyError.message
+            : "Não foi possível carregar seu histórico.",
+        );
+      } finally {
+        setDriverHistoryLoading(false);
+      }
+    },
+    reloadNotifications: async () => {
+      setNotificationsLoading(true);
+      setNotificationsError(null);
+      try {
+        const inbox = await api<{
+          notifications: NotificationItem[];
+          unread: number;
+        }>("/api/notifications");
+        setNotifications(inbox.notifications);
+        setUnreadNotifications(inbox.unread);
+      } catch (notificationError) {
+        setNotificationsError(
+          notificationError instanceof Error
+            ? notificationError.message
+            : "Não foi possível carregar as notificações.",
+        );
+      } finally {
+        setNotificationsLoading(false);
+      }
+    },
     acceptRide: (rideId: string) =>
       api(`/api/rides/${rideId}/accept`, { method: "POST" }),
     declineRide: (rideId: string) =>

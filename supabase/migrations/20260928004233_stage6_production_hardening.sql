@@ -2,6 +2,22 @@
 -- Endurecimento incremental para Push, consultas operacionais e producao.
 -- Nao recria nem remove estruturas/dados existentes.
 
+-- Esta migration precede a Etapa 5 pelo timestamp e precisa garantir a
+-- dependencia usada por notification_push_deliveries. A Etapa 5 mantem o
+-- mesmo CREATE TABLE IF NOT EXISTS para bancos que ja seguiram outra ordem.
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  endpoint text not null,
+  p256dh text not null,
+  auth text not null,
+  user_agent text,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(user_id, endpoint)
+);
+
 create table if not exists public.notification_push_deliveries (
   id uuid primary key default gen_random_uuid(),
   notification_id uuid not null references public.notifications(id) on delete cascade,

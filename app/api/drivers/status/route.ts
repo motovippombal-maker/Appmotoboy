@@ -15,15 +15,24 @@ export async function POST(request: Request) {
       if (!vehicle) throw new ApiError(403, "Cadastre sua moto antes de ficar online.", "VEHICLE_REQUIRED");
       if (!input.location) throw new ApiError(400, "A localização é obrigatória para ficar online.", "LOCATION_REQUIRED");
     }
-    const available = input.online && !activeRide;
-    const { error } = await supabase.from("drivers").update({ online: input.online, available }).eq("profile_id", user.id); if (error) throw error;
     const lastSeenAt = new Date().toISOString();
     if (input.online && input.location) {
-      const location = await supabase.from("driver_locations").upsert({ driver_id: user.id, latitude: input.location.latitude, longitude: input.location.longitude, accuracy_meters: input.location.accuracyMeters, updated_at: lastSeenAt });
+      const location = await supabase.rpc("upsert_driver_location_if_newer", {
+        p_driver_id: user.id,
+        p_ride_id: activeRide?.id || null,
+        p_latitude: input.location.latitude,
+        p_longitude: input.location.longitude,
+        p_accuracy_meters: input.location.accuracyMeters,
+        p_heading: null,
+        p_speed_mps: null,
+        p_recorded_at: lastSeenAt,
+      });
       if (location.error) throw location.error;
     } else {
       await supabase.from("driver_locations").update({ ride_id: null }).eq("driver_id", user.id);
     }
+    const available = input.online && !activeRide;
+    const { error } = await supabase.from("drivers").update({ online: input.online, available }).eq("profile_id", user.id); if (error) throw error;
     await audit(supabase, user.id, input.online ? "driver.online" : "driver.offline", "driver", user.id);
     return Response.json({ online: input.online, available, lastSeenAt: input.online ? lastSeenAt : null });
   } catch (error) { return jsonError(error); }

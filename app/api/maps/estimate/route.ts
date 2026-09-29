@@ -2,9 +2,8 @@ import { z } from "zod";
 import { ApiError, consumeRateLimit, jsonError, requireUser } from "@/lib/backend/api";
 import { calculateRoute } from "@/lib/backend/routing";
 import { requireConfiguredFare } from "@/lib/backend/fare";
-import { regionLabels, resolveRegionFare } from "@/lib/backend/region-fare";
 import { searchAddresses } from "@/lib/backend/geocoding";
-import { applyCoupon } from "@/lib/backend/coupons";
+import { publicPriceQuote, quoteRidePrice } from "@/lib/backend/ride-pricing";
 
 const point = z.object({ address: z.string().min(3).max(200), lat: z.number().min(-90).max(90).optional(), lng: z.number().min(-180).max(180).optional() });
 const schema = z.object({
@@ -14,10 +13,10 @@ const schema = z.object({
 });
 
 async function resolvePoint(input: z.infer<typeof point>) {
-  if (input.lat !== undefined && input.lng !== undefined) return { address: input.address, lat: input.lat, lng: input.lng, regionLabels: [] as string[] };
+  if (input.lat !== undefined && input.lng !== undefined) return { address: input.address, lat: input.lat, lng: input.lng };
   const [result] = await searchAddresses(input.address);
   if (!result) throw new ApiError(422, `Endereço não encontrado: ${input.address}`, "ADDRESS_NOT_FOUND");
-  return { address: result.address, lat: result.lat, lng: result.lng, regionLabels: regionLabels({ city: result.city, state: result.state }) };
+  return { address: result.address, lat: result.lat, lng: result.lng };
 }
 
 export async function POST(request: Request) {
@@ -31,18 +30,18 @@ export async function POST(request: Request) {
     const route = await calculateRoute(origin, destination);
     const { data: setting } = await supabase.from("system_settings").select("value").eq("key", "fare").single();
     requireConfiguredFare(setting?.value);
-    const regionalFare = await resolveRegionFare(supabase, resolvedDestination.address, resolvedDestination.regionLabels);
-    const coupon = await applyCoupon(supabase, user.id, input.couponCode, regionalFare.fareCents);
+    const quoted = await quoteRidePrice({
+      supabase,
+      passengerId: user.id,
+      origin,
+      destination,
+      couponCode: input.couponCode,
+    });
     return Response.json({
       origin,
       destination,
       ...route,
-      fareCents: coupon?.fareCents ?? regionalFare.fareCents,
-      originalFareCents: coupon?.originalFareCents ?? regionalFare.fareCents,
-      discountCents: coupon?.discountCents ?? 0,
-      coupon: coupon ? { code: coupon.code, description: coupon.description } : null,
-      fareRegion: regionalFare.fareRegion,
-      pricingMode: "region",
+      ...publicPriceQuote(quoted),
     });
   } catch (error) { return jsonError(error); }
 }

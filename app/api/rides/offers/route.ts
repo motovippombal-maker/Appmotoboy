@@ -1,9 +1,11 @@
 import { jsonError, requireUser } from "@/lib/backend/api";
+import { expireRideSearches } from "@/lib/backend/dispatch";
 import { distanceKm } from "@/lib/backend/routing";
 
 export async function GET(request: Request) {
   try {
     const { supabase, user } = await requireUser(request, ["driver"]);
+    await expireRideSearches(supabase);
     const now = new Date().toISOString();
     const [{ data: requests, error }, { data: location }] = await Promise.all([
       supabase.from("ride_requests").select("id,ride_id,expires_at,rides(*)").eq("driver_id", user.id).eq("status", "pending").gt("expires_at", now).order("created_at", { ascending: false }),

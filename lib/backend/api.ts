@@ -1,18 +1,11 @@
 import type { User } from "@supabase/supabase-js";
 import { ZodError } from "zod";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
+import { ApiError } from "@/lib/backend/errors";
+
+export { ApiError } from "@/lib/backend/errors";
 
 export type AppRole = "passenger" | "driver" | "admin";
-
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    public code: string,
-  ) {
-    super(message);
-  }
-}
 
 export async function requireUser(request: Request, roles?: AppRole[]) {
   const value = request.headers.get("authorization");
@@ -85,7 +78,7 @@ export async function consumeRateLimit(
 export function jsonError(error: unknown) {
   if (error instanceof ApiError)
     return Response.json(
-      { error: error.code, message: error.message },
+      { error: error.code, message: error.message, ...error.details },
       { status: error.status },
     );
   if (error instanceof ZodError)

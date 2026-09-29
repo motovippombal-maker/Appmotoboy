@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { readExecutionProfile } from "./execution-profile.mjs";
 
@@ -12,6 +13,11 @@ if (managedLinux && command === "build") {
   ], { stdio: "inherit" });
   if (result.error) throw result.error;
   process.exit(result.status ?? 1);
+}
+
+if (!managedLinux && command === "build") {
+  rmSync(new URL("../.next/types/validator.ts", import.meta.url), { force: true });
+  rmSync(new URL("../.next/dev/types/validator.ts", import.meta.url), { force: true });
 }
 
 // Import in this process so the preview owner retains its PID and signals.

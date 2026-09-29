@@ -82,16 +82,32 @@ Principais etapas:
 5. hardening de produção e fila Push;
 6. tarifas por região/bairro.
 
-## Tarifa atual
+## Tarifa atual e área de atendimento
 
-A cobrança utiliza a região identificada no destino:
+A cobrança regional é resolvida no backend pelas coordenadas de origem e destino:
 
 - tarifa padrão da cidade: R$ 5,00;
 - Pombalzinho: R$ 7,00;
 - Vila Operária: R$ 7,00;
 - cobrança por minuto: R$ 0,00.
 
-Os valores ficam no banco e podem ser alterados no painel administrativo. Distância e duração continuam sendo calculadas e registradas, mas não modificam a cobrança regional atual. O preço é recalculado e protegido pelo backend.
+Os valores ficam no banco e podem ser alterados no painel administrativo. Distância e duração continuam sendo calculadas e registradas, mas não modificam a cobrança regional atual. A cotação recebe uma assinatura temporária do backend; se uma tarifa ou regra mudar antes da confirmação, a corrida não é criada até o passageiro confirmar a nova cotação.
+
+### Configuração geográfica obrigatória
+
+O repositório não contém um limite geográfico oficial de Ribeira do Pombal. Por segurança, a migration da ETAPA 3 cria `service_areas`, mas não insere coordenadas. Antes da produção, um administrador do banco deve cadastrar o limite oficial como GeoJSON `Polygon` ou `MultiPolygon`, usando posições na ordem `[longitude, latitude]`.
+
+As regiões de tarifa especial usam o mesmo formato no campo `fare_regions.boundary`. Uma região especial ativa sem polígono não é aplicada por nome de endereço; dentro da área atendida, a tarifa padrão é usada. Em sobreposições, vence a maior `priority`; empates são resolvidos por nome e depois por ID em ordem crescente. Fora de uma área ativa que permita origem ou destino, o backend bloqueia a cotação com uma resposta controlada.
+
+Polígonos fictícios existem somente nos testes automatizados. Nenhuma coordenada oficial foi presumida pelo projeto.
+
+## GPS, mapa e endereços
+
+As coordenadas obtidas pelo GPS ou escolhidas manualmente no mapa são a fonte da posição da corrida. A geocodificação reversa acrescenta somente a descrição do endereço e nunca substitui o ponto original.
+
+A busca de endereços passa por uma camada de provedores e é executada somente quando a pessoa toca no botão de busca ou pressiona Enter. Atualmente são consultados Photon e Nominatim público de forma independente; não existe autocomplete contínuo configurado. Se um provedor falhar, resultados válidos do outro continuam disponíveis. Para autocomplete futuro será necessário configurar um provedor próprio que permita esse tipo de uso e suas credenciais reais.
+
+O GPS usado pelo aplicativo funciona enquanto a página está aberta e autorizada pelo navegador. Localização contínua com o aplicativo fechado ou em segundo plano permanece pendente de homologação em PWA/aplicativo nativo e não é prometida por esta implementação.
 
 ## Produção
 

@@ -57,17 +57,43 @@ import {
 } from "lucide-react";
 import { AuthPortal } from "@/components/auth/auth-portal";
 import { RealMap, type LivePoint } from "@/components/map/real-map";
+import {
+  coordinatesFromGeolocation,
+  geolocationErrorMessage,
+  isValidCoordinates,
+  preserveExactCoordinates,
+} from "@/lib/location/coordinates";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useMotoVip,
+  BackendApiError,
   type AddressResult,
   type FareConfig,
+  type HistoryRide,
   type NearbyDriver,
   type QuickPlace,
   type Ride,
+  type TrackingRoute,
 } from "@/hooks/use-moto-vip";
+import {
+  externalNavigationTarget,
+  isLocationFresh,
+  shouldRecalculateEta,
+  shouldSendLocationUpdate,
+  trackingPhase,
+  type EtaCalculation,
+  type LocationSample,
+} from "@/lib/tracking/realtime";
+import {
+  historyPanelState,
+  mobileNavItem,
+  nextPassengerMobileView,
+  notificationPanelState,
+  shouldLockBackground,
+  type PassengerMobileView,
+} from "@/lib/mobile/passenger-navigation";
 
 type Backend = ReturnType<typeof useMotoVip>;
 type Estimate = {
@@ -81,8 +107,43 @@ type Estimate = {
   discountCents?: number;
   coupon?: { code: string; description: string | null } | null;
   fareRegion: { id: string; name: string; isDefault: boolean };
+  serviceArea: { id: string; name: string };
   pricingMode: "region";
+  quoteToken: string;
+  quoteExpiresAt: string;
 };
+
+function coordinateOnlyAddress(
+  point: LivePoint,
+  shortAddress: string,
+): AddressResult {
+  return {
+    id: `coords-${point.lat}-${point.lng}`,
+    address: `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`,
+    shortAddress,
+    lat: point.lat,
+    lng: point.lng,
+    city: "",
+    state: "",
+    approximate: true,
+    provider: "coordinates",
+  };
+}
+
+function quoteFromApiError(error: BackendApiError): Estimate | null {
+  const quote = error.payload.quote;
+  if (
+    !quote ||
+    typeof quote !== "object" ||
+    !("fareCents" in quote) ||
+    typeof quote.fareCents !== "number" ||
+    !("quoteToken" in quote) ||
+    typeof quote.quoteToken !== "string"
+  ) {
+    return null;
+  }
+  return quote as Estimate;
+}
 
 function money(cents = 0) {
   return new Intl.NumberFormat("pt-BR", {
@@ -100,18 +161,6 @@ function initials(name = "Moto SyXp") {
     .map((part) => part[0])
     .join("")
     .toUpperCase();
-}
-function distanceMeters(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-) {
-  const rad = (value: number) => (value * Math.PI) / 180;
-  const dLat = rad(b.lat - a.lat);
-  const dLng = rad(b.lng - a.lng);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
-  return Math.round(6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)));
 }
 function routePoints(geometry?: string) {
   try {
@@ -144,6 +193,23 @@ function paymentLabel(status?: string) {
         cancelado: "Cancelado",
       } as Record<string, string>
     )[status || ""] || "Pendente"
+  );
+}
+
+function rideStatusLabel(status?: string) {
+  return (
+    (
+      {
+        finalizada: "Finalizada",
+        cancelada: "Cancelada",
+        em_corrida: "Em andamento",
+        motorista_chegou: "Motorista no local",
+        motorista_a_caminho: "Motorista a caminho",
+        aceita: "Aceita",
+        procurando_motorista: "Procurando motorista",
+        solicitada: "Solicitada",
+      } as Record<string, string>
+    )[status || ""] || status?.replaceAll("_", " ") || "Status indisponível"
   );
 }
 
@@ -327,13 +393,14 @@ function MapCanvas({
   route?: Array<[number, number]>;
   admin?: boolean;
   connected?: boolean;
-  onRequestLocation?: () => void;
+  onRequestLocation?: () => void | Promise<void>;
 }) {
   const [locationStatus, setLocationStatus] = useState(
     "Usar minha localização",
   );
   const [fallbackLocation, setFallbackLocation] = useState<LivePoint>();
   const [fallbackAccuracy, setFallbackAccuracy] = useState<number>();
+  const [centerRequest, setCenterRequest] = useState(0);
   const [connectionExpanded, setConnectionExpanded] = useState(true);
   useEffect(() => {
     const reveal = window.setTimeout(() => setConnectionExpanded(true), 0);
@@ -345,25 +412,23 @@ function MapCanvas({
       if (collapse) window.clearTimeout(collapse);
     };
   }, [connected]);
-  function requestLocation() {
-    if (!("geolocation" in navigator)) {
-      setLocationStatus("GPS indisponível");
-      return;
-    }
+  async function requestLocation() {
     setLocationStatus("Localizando…");
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setFallbackLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          label: "Você está aqui",
-        });
-        setFallbackAccuracy(position.coords.accuracy);
-        setLocationStatus("Localização ativa");
-      },
-      () => setLocationStatus("Permissão necessária"),
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 },
-    );
+    try {
+      const position = await gpsPosition();
+      const point = coordinatesFromGeolocation(position.coords);
+      setFallbackLocation({ ...point, label: "Você está aqui" });
+      setFallbackAccuracy(position.coords.accuracy);
+      setLocationStatus("Localização ativa");
+    } catch (error) {
+      setLocationStatus(
+        error instanceof Error ? error.message : "GPS indisponível",
+      );
+    }
+  }
+  async function centerMap() {
+    await (onRequestLocation ? onRequestLocation() : requestLocation());
+    setCenterRequest((value) => value + 1);
   }
   return (
     <div
@@ -383,6 +448,14 @@ function MapCanvas({
           label: `Motorista disponível · ${(point.distanceMeters / 1000).toFixed(1)} km`,
         }))}
         route={route}
+        centerTarget={
+          currentLocation ||
+          fallbackLocation ||
+          driver ||
+          origin ||
+          destination
+        }
+        centerRequest={centerRequest}
       />
       {!admin && (
         <button
@@ -404,7 +477,7 @@ function MapCanvas({
         <button
           aria-label={locationStatus}
           title={locationStatus}
-          onClick={onRequestLocation || requestLocation}
+          onClick={() => void centerMap()}
         >
           <Crosshair />
         </button>
@@ -449,40 +522,40 @@ function AddressField({
   const [suggestions, setSuggestions] = useState<AddressResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
+  const searchSequence = useRef(0);
 
-  useEffect(() => {
+  async function searchExplicitly() {
     const query = value.trim();
-    if (!focused || selected || query.length < 3) return;
-    let current = true;
-    const timer = window.setTimeout(() => {
-      setSearching(true);
-      setSearchError("");
-      void backend
-        .searchAddresses(query)
-        .then(({ results }) => {
-          if (!current) return;
-          setSuggestions(results);
-          setSearching(false);
-          if (!results.length)
-            setSearchError(
-              "Nenhum endereço encontrado. Você pode escolher o ponto no mapa.",
-            );
-        })
-        .catch((error: unknown) => {
-          if (!current) return;
-          setSearching(false);
-          setSearchError(
-            error instanceof Error
-              ? error.message
-              : "Não foi possível buscar endereços.",
-          );
-        });
-    }, 450);
-    return () => {
-      current = false;
-      window.clearTimeout(timer);
-    };
-  }, [backend, focused, selected, value]);
+    if (query.length < 3) {
+      setSearchError("Digite pelo menos 3 caracteres para buscar.");
+      return;
+    }
+    const sequence = searchSequence.current + 1;
+    searchSequence.current = sequence;
+    setFocused(true);
+    setSearching(true);
+    setSearchError("");
+    try {
+      const { results } = await backend.searchAddresses(query);
+      if (searchSequence.current !== sequence) return;
+      setSuggestions(results);
+      if (!results.length) {
+        setSearchError(
+          "Nenhum endereço encontrado. Você pode escolher o ponto no mapa.",
+        );
+      }
+    } catch (error) {
+      if (searchSequence.current !== sequence) return;
+      setSuggestions([]);
+      setSearchError(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível buscar endereços.",
+      );
+    } finally {
+      if (searchSequence.current === sequence) setSearching(false);
+    }
+  }
 
   return (
     <div className={`smart-address ${focused ? "is-focused" : ""}`}>
@@ -499,10 +572,16 @@ function AddressField({
             onFocus={() => setFocused(true)}
             onBlur={() => window.setTimeout(() => setFocused(false), 180)}
             onChange={(event) => {
+              searchSequence.current += 1;
               setSuggestions([]);
               setSearchError("");
-              setSearching(event.target.value.trim().length >= 3);
+              setSearching(false);
               onChange(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              void searchExplicitly();
             }}
             aria-label={label}
             role="combobox"
@@ -514,6 +593,16 @@ function AddressField({
           />
         </span>
         <span className="field-actions">
+          <button
+            type="button"
+            className="field-action"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => void searchExplicitly()}
+            aria-label={`Buscar ${label.toLowerCase()}`}
+            disabled={searching || value.trim().length < 3}
+          >
+            <Search className={searching ? "is-spinning" : ""} />
+          </button>
           {onUseGps && (
             <button
               type="button"
@@ -575,6 +664,11 @@ function AddressField({
           {!searching && searchError && (
             <div className="address-search-state error">{searchError}</div>
           )}
+          {!searching && !searchError && !suggestions.length && (
+            <div className="address-search-state">
+              Digite o endereço e toque em buscar.
+            </div>
+          )}
           {!searching &&
             (searchError || suggestions.some((item) => item.approximate)) && (
               <button
@@ -620,13 +714,14 @@ function MapAddressPicker({
     setMessage("Identificando o endereço do ponto…");
     try {
       const result = await backend.reverseAddress(point.lat, point.lng);
-      onConfirm(result);
+      onConfirm(preserveExactCoordinates(point, result));
     } catch (error) {
       setMessage(
         error instanceof Error
-          ? error.message
-          : "Não foi possível identificar esse ponto.",
+          ? `${error.message} Usando a coordenada exata selecionada.`
+          : "Endereço indisponível. Usando a coordenada exata selecionada.",
       );
+      onConfirm(coordinateOnlyAddress(point, "Ponto selecionado no mapa"));
     } finally {
       setBusy(false);
     }
@@ -686,7 +781,14 @@ function gpsPosition() {
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      resolve,
+      (position) => {
+        try {
+          coordinatesFromGeolocation(position.coords);
+          resolve(position);
+        } catch (error) {
+          reject(error);
+        }
+      },
       (error) => reject(new Error(geolocationMessage(error))),
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     );
@@ -694,12 +796,7 @@ function gpsPosition() {
 }
 
 function geolocationMessage(error: GeolocationPositionError) {
-  if (error.code === 1) return "Permissão de localização negada";
-  if (error.code === 2)
-    return "Não foi possível obter sua localização. Verifique se o GPS está ativado.";
-  if (error.code === 3)
-    return "Não foi possível obter sua localização. O GPS demorou para responder.";
-  return "Não foi possível obter sua localização";
+  return geolocationErrorMessage(error.code);
 }
 
 function rideStage(ride: Ride | null, hasEstimate: boolean) {
@@ -756,7 +853,16 @@ function NotificationsPanel({
         <small className="notification-message">{pushMessage}</small>
       )}
       <div className="notification-list">
-        {backend.notifications.length ? (
+        {backend.notificationsLoading ? (
+          <p role="status">Carregando notificações…</p>
+        ) : backend.notificationsError ? (
+          <div className="panel-error" role="alert">
+            <p>{backend.notificationsError}</p>
+            <button type="button" onClick={backend.reloadNotifications}>
+              Tentar novamente
+            </button>
+          </div>
+        ) : backend.notifications.length ? (
           backend.notifications.slice(0, 8).map((item) => (
             <button
               key={item.id}
@@ -776,10 +882,235 @@ function NotificationsPanel({
             </button>
           ))
         ) : (
-          <p>Nenhuma notificação ainda.</p>
+          <p>Você não possui notificações.</p>
         )}
       </div>
     </details>
+  );
+}
+
+function PassengerMobilePanel({
+  backend,
+  view,
+  selectedRide,
+  onBack,
+  onOpenNotifications,
+  onOpenRide,
+}: {
+  backend: Backend;
+  view: Exclude<PassengerMobileView, "home">;
+  selectedRide: HistoryRide | null;
+  onBack: () => void;
+  onOpenNotifications: () => void;
+  onOpenRide: (ride: HistoryRide) => void;
+}) {
+  const historyState = historyPanelState({
+    loading: backend.passengerHistoryLoading,
+    error: backend.passengerHistoryError,
+    count: backend.passengerHistory.length,
+  });
+  const notificationState = notificationPanelState({
+    loading: backend.notificationsLoading,
+    error: backend.notificationsError,
+    count: backend.notifications.length,
+  });
+  const title =
+    view === "rides"
+      ? "Minhas corridas"
+      : view === "ride-details"
+        ? "Detalhes da corrida"
+        : view === "notifications"
+          ? "Notificações"
+          : "Minha conta";
+  return (
+    <section
+      className="passenger-mobile-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="passenger-mobile-panel-title"
+    >
+      <header>
+        <button type="button" onClick={onBack} aria-label="Voltar">
+          <ChevronRight />
+        </button>
+        <h2 id="passenger-mobile-panel-title">{title}</h2>
+        <span aria-hidden="true" />
+      </header>
+      <div className="passenger-mobile-panel-content" tabIndex={-1}>
+        {view === "rides" && historyState === "loading" && (
+          <div className="mobile-panel-state" role="status">
+            <History />
+            <p>Carregando suas corridas…</p>
+          </div>
+        )}
+        {view === "rides" && historyState === "empty" && (
+          <div className="mobile-panel-state">
+            <History />
+            <p>Você ainda não possui corridas.</p>
+          </div>
+        )}
+        {view === "rides" && historyState === "error" && (
+          <div className="mobile-panel-state error" role="alert">
+            <History />
+            <p>{backend.passengerHistoryError}</p>
+            <Button type="button" onClick={backend.reloadPassengerHistory}>
+              Tentar novamente
+            </Button>
+          </div>
+        )}
+        {view === "rides" && historyState === "success" && (
+          <div className="mobile-history-list">
+            {backend.passengerHistory.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onOpenRide(item)}
+                aria-label={`Ver corrida para ${item.destination_address}`}
+              >
+                <span>
+                  <small>
+                    {new Intl.DateTimeFormat("pt-BR", {
+                      dateStyle: "short",
+                      timeStyle: "short",
+                    }).format(new Date(item.completed_at || item.created_at))}
+                  </small>
+                  <b>{item.destination_address}</b>
+                  <em>{rideStatusLabel(item.status)}</em>
+                </span>
+                <strong>{money(item.final_fare_cents ?? item.fare_cents)}</strong>
+                <ChevronRight />
+              </button>
+            ))}
+          </div>
+        )}
+        {view === "ride-details" && selectedRide && (
+          <article className="mobile-ride-details">
+            <div>
+              <small>Origem</small>
+              <b>{selectedRide.origin_address}</b>
+            </div>
+            <div>
+              <small>Destino</small>
+              <b>{selectedRide.destination_address}</b>
+            </div>
+            <dl>
+              <div>
+                <dt>Data e horário</dt>
+                <dd>
+                  {new Intl.DateTimeFormat("pt-BR", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }).format(
+                    new Date(selectedRide.completed_at || selectedRide.created_at),
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd>{rideStatusLabel(selectedRide.status)}</dd>
+              </div>
+              <div>
+                <dt>Valor</dt>
+                <dd>{money(selectedRide.final_fare_cents ?? selectedRide.fare_cents)}</dd>
+              </div>
+              <div>
+                <dt>Motorista</dt>
+                <dd>{selectedRide.driver_name || "Não informado"}</dd>
+              </div>
+            </dl>
+          </article>
+        )}
+        {view === "ride-details" && !selectedRide && (
+          <div className="mobile-panel-state">
+            <p>Selecione uma corrida no histórico.</p>
+          </div>
+        )}
+        {view === "profile" && (
+          <div className="mobile-account-panel">
+            <div className="mobile-account-identity">
+              <span>{initials(backend.profile?.full_name)}</span>
+              <div>
+                <b>{backend.profile?.full_name || "Passageiro"}</b>
+                <small>Conta de passageiro</small>
+              </div>
+            </div>
+            <button type="button" onClick={onOpenNotifications}>
+              <Bell />
+              <span>
+                <b>Notificações</b>
+                <small>
+                  {backend.unreadNotifications
+                    ? `${backend.unreadNotifications} não lida(s)`
+                    : "Nenhuma notificação não lida"}
+                </small>
+              </span>
+              <ChevronRight />
+            </button>
+            <button type="button" onClick={() => backend.signOut()}>
+              <LockKeyhole />
+              <span>
+                <b>Sair da conta</b>
+                <small>Encerrar esta sessão</small>
+              </span>
+              <ChevronRight />
+            </button>
+          </div>
+        )}
+        {view === "notifications" && notificationState === "loading" && (
+          <div className="mobile-panel-state" role="status">
+            <Bell />
+            <p>Carregando notificações…</p>
+          </div>
+        )}
+        {view === "notifications" && notificationState === "empty" && (
+          <div className="mobile-panel-state">
+            <Bell />
+            <p>Você não possui notificações.</p>
+          </div>
+        )}
+        {view === "notifications" && notificationState === "error" && (
+          <div className="mobile-panel-state error" role="alert">
+            <Bell />
+            <p>{backend.notificationsError}</p>
+            <Button type="button" onClick={backend.reloadNotifications}>
+              Tentar novamente
+            </Button>
+          </div>
+        )}
+        {view === "notifications" && notificationState === "success" && (
+          <div className="mobile-notification-list">
+            {backend.unreadNotifications > 0 && (
+              <button
+                type="button"
+                className="mark-all-read"
+                onClick={() => backend.markNotificationsRead()}
+              >
+                Marcar todas como lidas
+              </button>
+            )}
+            {backend.notifications.map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                className={item.read_at ? "read" : ""}
+                onClick={() =>
+                  !item.read_at && backend.markNotificationsRead(item.id)
+                }
+              >
+                <b>{item.title}</b>
+                <span>{item.body}</span>
+                <small>
+                  {new Intl.DateTimeFormat("pt-BR", {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                  }).format(new Date(item.created_at))}
+                </small>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -802,6 +1133,10 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [nearbyDrivers, setNearbyDrivers] = useState<NearbyDriver[]>([]);
+  const [trackingEta, setTrackingEta] = useState<TrackingRoute | null>(null);
+  const [trackingEtaError, setTrackingEtaError] = useState("");
+  const etaCalculationRef = useRef<EtaCalculation | null>(null);
+  const nearbyRefreshAtRef = useRef(0);
   const [ratingScore, setRatingScore] = useState(5);
   const [ratingComment, setRatingComment] = useState("");
   const [selectedQuickPlace, setSelectedQuickPlace] =
@@ -824,9 +1159,11 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   const [quickPlaceCategory, setQuickPlaceCategory] = useState<
     QuickPlace["category"] | "all"
   >("all");
-  const [mobileNav, setMobileNav] = useState<
-    "home" | "rides" | "coupons" | "wallet" | "profile"
-  >("home");
+  const [mobileView, setMobileView] =
+    useState<PassengerMobileView>("home");
+  const [selectedHistoryRide, setSelectedHistoryRide] =
+    useState<HistoryRide | null>(null);
+  const activeMobileNav = mobileNavItem(mobileView);
   const [isOnline, setIsOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine,
   );
@@ -837,6 +1174,15 @@ function PassengerPanel({ backend }: { backend: Backend }) {
     if (!gpsTrackingEnabled || !("geolocation" in navigator)) return;
     const watcher = navigator.geolocation.watchPosition(
       (position) => {
+        if (
+          !isValidCoordinates({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          })
+        ) {
+          setLocationStatus("O GPS retornou coordenadas inválidas.");
+          return;
+        }
         setDeviceLocation({
           lat: position.coords.latitude,
           lng: position.coords.longitude,
@@ -846,7 +1192,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
         void backendRef.current.updateLocation(position).catch(() => undefined);
       },
       (error) => {
-        if (error.code === 1) setLocationStatus(geolocationMessage(error));
+        setLocationStatus(geolocationMessage(error));
       },
       { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 },
     );
@@ -862,11 +1208,138 @@ function PassengerPanel({ backend }: { backend: Backend }) {
       window.removeEventListener("offline", offline);
     };
   }, []);
+  useEffect(() => {
+    const openRides = () => {
+      setSelectedHistoryRide(null);
+      setMobileView("rides");
+    };
+    const openNotifications = () => {
+      setSelectedHistoryRide(null);
+      setMobileView("notifications");
+    };
+    document.addEventListener("moto-syxp:open-rides", openRides);
+    document.addEventListener(
+      "moto-syxp:open-notifications",
+      openNotifications,
+    );
+    return () => {
+      document.removeEventListener("moto-syxp:open-rides", openRides);
+      document.removeEventListener(
+        "moto-syxp:open-notifications",
+        openNotifications,
+      );
+    };
+  }, []);
+  useEffect(() => {
+    if (!shouldLockBackground(mobileView)) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [mobileView]);
   const ride = backend.activeRide || backend.completedRide;
   const stage =
     backend.completedRide && !backend.activeRide
       ? "finished"
       : rideStage(ride, Boolean(estimate));
+  const activeRide = backend.activeRide;
+  const driverLocation = backend.driverLocation;
+  useEffect(() => {
+    if (!activeRide || mobileView === "home") return;
+    const timer = window.setTimeout(() => {
+      setMobileView("home");
+      setSelectedHistoryRide(null);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeRide, mobileView]);
+  useEffect(() => {
+    const center = estimate?.origin || originPoint || deviceLocation;
+    if (activeRide || backend.nearbyRevision === 0 || !center) return;
+    let cancelled = false;
+    const wait = Math.max(0, 10_000 - (Date.now() - nearbyRefreshAtRef.current));
+    const timer = window.setTimeout(() => {
+      nearbyRefreshAtRef.current = Date.now();
+      void backendRef.current
+        .findNearbyDrivers({ lat: center.lat, lng: center.lng })
+        .then((result) => {
+          if (!cancelled) setNearbyDrivers(result.drivers);
+        })
+        .catch(() => undefined);
+    }, wait);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    activeRide,
+    backend.nearbyRevision,
+    deviceLocation,
+    estimate,
+    originPoint,
+  ]);
+  useEffect(() => {
+    const phase = trackingPhase(activeRide?.status);
+    if (!activeRide || !phase) {
+      etaCalculationRef.current = null;
+      const timer = window.setTimeout(() => {
+        setTrackingEta(null);
+        setTrackingEtaError("");
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    const freshnessSeconds = driverLocation?.freshnessSeconds || 45;
+    if (
+      !driverLocation ||
+      driverLocation.stale ||
+      !isLocationFresh(driverLocation, freshnessSeconds)
+    ) {
+      const timer = window.setTimeout(() => {
+        setTrackingEta(null);
+        setTrackingEtaError(
+          driverLocation
+            ? "Localização do motorista desatualizada."
+            : "Aguardando a localização do motorista.",
+        );
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    if (
+      !shouldRecalculateEta(
+        etaCalculationRef.current,
+        phase,
+        driverLocation,
+      )
+    ) {
+      return;
+    }
+    let cancelled = false;
+    etaCalculationRef.current = {
+      phase,
+      location: driverLocation,
+      calculatedAt: Date.now(),
+    };
+    void backendRef.current
+      .trackingRoute(activeRide.id)
+      .then((result) => {
+        if (cancelled) return;
+        setTrackingEta(result);
+        setTrackingEtaError("");
+        etaCalculationRef.current = {
+          phase: result.phase,
+          location: driverLocation,
+          calculatedAt: Date.parse(result.calculatedAt) || Date.now(),
+        };
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTrackingEta(null);
+        setTrackingEtaError("Tempo estimado temporariamente indisponível.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRide, driverLocation]);
   useEffect(() => {
     const refreshMap = () =>
       document.dispatchEvent(new Event("moto-syxp:map-layout"));
@@ -913,13 +1386,6 @@ function PassengerPanel({ backend }: { backend: Backend }) {
         : undefined;
   const driverName = ride?.driver?.profiles?.full_name || "Seu Moto SyXp";
   const vehicle = ride?.driver?.vehicles?.[0];
-  const driverDistance =
-    ride && backend.driverLocation
-      ? distanceMeters(
-          { lat: backend.driverLocation.lat, lng: backend.driverLocation.lng },
-          { lat: ride.origin_lat, lng: ride.origin_lng },
-        )
-      : undefined;
   const route = routePoints(ride?.route_geometry || estimate?.geometry);
   const completedEntry = ride
     ? backend.passengerHistory.find((item) => item.id === ride.id)
@@ -985,19 +1451,18 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   async function locateDevice() {
     setLocationStatus("Obtendo sua localização…");
     const position = await gpsPosition();
-    setDeviceLocation({
-      lat: position.coords.latitude,
-      lng: position.coords.longitude,
-      label: "Você está aqui",
-    });
+    const exact = coordinatesFromGeolocation(position.coords);
+    setDeviceLocation({ ...exact, label: "Você está aqui" });
     setGpsAccuracy(position.coords.accuracy);
     setGpsTrackingEnabled(true);
-    const result = await backend.reverseAddress(
-      position.coords.latitude,
-      position.coords.longitude,
-    );
+    let result: AddressResult;
+    try {
+      result = await backend.reverseAddress(exact.lat, exact.lng);
+    } catch {
+      result = coordinateOnlyAddress(exact, "Minha localização");
+    }
     await backend.updateLocation(position).catch(() => undefined);
-    return result;
+    return preserveExactCoordinates(exact, result);
   }
 
   async function useCurrentLocation() {
@@ -1009,7 +1474,34 @@ function PassengerPanel({ backend }: { backend: Backend }) {
       setOriginAddress(result.address);
       setEstimate(null);
       setLocationStatus("Localização encontrada");
-      setNotice("Localização encontrada");
+      setNotice(
+        result.provider === "coordinates"
+          ? "Localização encontrada. O endereço não pôde ser identificado; a coordenada exata foi preservada."
+          : "Localização encontrada",
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Não foi possível obter sua localização";
+      setLocationStatus(message);
+      setNotice(message);
+    } finally {
+      setGpsBusy(false);
+    }
+  }
+
+  async function centerOnCurrentLocation() {
+    setNotice("");
+    setGpsBusy(true);
+    try {
+      const result = await locateDevice();
+      setLocationStatus("Mapa centralizado na localização atual");
+      if (result.provider === "coordinates") {
+        setNotice(
+          "Mapa centralizado no GPS. O endereço não pôde ser identificado.",
+        );
+      }
     } catch (error) {
       const message =
         error instanceof Error
@@ -1050,6 +1542,14 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   }
 
   function openPanel(id: string) {
+    if (
+      id === "passenger-history" &&
+      window.matchMedia("(max-width: 950px)").matches
+    ) {
+      setSelectedHistoryRide(null);
+      setMobileView("rides");
+      return;
+    }
     const panel = document.getElementById(id) as HTMLDetailsElement | null;
     if (panel) {
       panel.open = true;
@@ -1065,6 +1565,8 @@ function PassengerPanel({ backend }: { backend: Backend }) {
       setNotice("Informe o destino.");
       return;
     }
+    setEstimate(null);
+    setNearbyDrivers([]);
     setBusy(true);
     setNotice("");
     try {
@@ -1152,10 +1654,23 @@ function PassengerPanel({ backend }: { backend: Backend }) {
         destination: estimate.destination,
         paymentMethod,
         couponCode: estimate.coupon?.code,
+        quoteToken: estimate.quoteToken,
       });
       setEstimate(null);
       setNearbyDrivers([]);
     } catch (error) {
+      if (
+        error instanceof BackendApiError &&
+        (error.code === "QUOTE_PRICE_CHANGED" ||
+          error.code === "QUOTE_EXPIRED")
+      ) {
+        const refreshed = quoteFromApiError(error);
+        if (refreshed) {
+          setEstimate(refreshed);
+          setNotice(`${error.message} Novo valor: ${money(refreshed.fareCents)}.`);
+          return;
+        }
+      }
       setNotice(
         error instanceof Error
           ? error.message
@@ -1290,7 +1805,9 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                 : [
                     "Corrida em andamento",
                     "Rumo ao destino",
-                    `${minutes(ride?.estimated_duration_seconds || ride?.duration_seconds)} min estimados.`,
+                    trackingEta?.phase === "trip"
+                      ? `${minutes(trackingEta.durationSeconds)} min até o destino.`
+                      : trackingEtaError || "Calculando o tempo até o destino…",
                   ];
   return (
     <div
@@ -1304,10 +1821,10 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           accuracyMeters={gpsAccuracy}
           nearbyDrivers={nearbyDrivers}
           route={route}
-          connected={isOnline && backend.realtimeStatus !== "CLOSED"}
-          onRequestLocation={useCurrentLocation}
+          connected={isOnline && backend.realtimeStatus === "connected"}
+          onRequestLocation={centerOnCurrentLocation}
           driver={
-            backend.driverLocation
+            backend.driverLocation && !backend.driverLocation.stale
               ? {
                   lat: backend.driverLocation.lat,
                   lng: backend.driverLocation.lng,
@@ -1966,10 +2483,11 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                       : "Motorista a caminho"}
                 </b>
                 <small>
-                  {driverDistance !== undefined && stage !== "riding"
-                    ? `${(driverDistance / 1000).toFixed(1)} km até você · `
-                    : ""}
-                  {minutes(ride.duration_seconds)} min estimados
+                  {stage === "arrived"
+                    ? "Motorista aguardando no ponto de embarque"
+                    : trackingEta
+                      ? `${(trackingEta.distanceMeters / 1000).toFixed(1)} km · ${minutes(trackingEta.durationSeconds)} min ${trackingEta.phase === "pickup" ? "até você" : "até o destino"}`
+                      : trackingEtaError || "Calculando rota em tempo real…"}
                 </small>
               </div>
             </div>
@@ -1991,13 +2509,23 @@ function PassengerPanel({ backend }: { backend: Backend }) {
               MINHAS CORRIDAS <span>{backend.passengerHistory.length}</span>
             </summary>
             <div>
-              {backend.passengerHistory.length ? (
+              {backend.passengerHistoryLoading ? (
+                <p role="status">Carregando suas corridas…</p>
+              ) : backend.passengerHistoryError ? (
+                <div className="panel-error" role="alert">
+                  <p>{backend.passengerHistoryError}</p>
+                  <button type="button" onClick={backend.reloadPassengerHistory}>
+                    Tentar novamente
+                  </button>
+                </div>
+              ) : backend.passengerHistory.length ? (
                 backend.passengerHistory.map((item) => (
                   <details key={item.id} className="history-item">
                     <summary>
                       <span>
                         {new Intl.DateTimeFormat("pt-BR", {
                           dateStyle: "short",
+                          timeStyle: "short",
                         }).format(
                           new Date(item.completed_at || item.created_at),
                         )}
@@ -2012,6 +2540,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                         {item.origin_address} → {item.destination_address}
                       </p>
                       <span>Motorista: {item.driver_name || "—"}</span>
+                      <span>Status: {rideStatusLabel(item.status)}</span>
                       <span>
                         {((item.actual_distance_meters || 0) / 1000).toFixed(2)}{" "}
                         km · {durationLabel(item.actual_duration_seconds)}
@@ -2029,7 +2558,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                   </details>
                 ))
               ) : (
-                <p>Nenhuma corrida concluída.</p>
+                <p>Você ainda não possui corridas.</p>
               )}
             </div>
           </details>
@@ -2038,15 +2567,42 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           <NotificationsPanel backend={backend} id="passenger-notifications" />
         )}
       </section>
+      {mobileView !== "home" && (
+        <PassengerMobilePanel
+          backend={backend}
+          view={mobileView}
+          selectedRide={selectedHistoryRide}
+          onBack={() => {
+            const next = nextPassengerMobileView(mobileView, "back");
+            setMobileView(next);
+            if (next !== "ride-details") setSelectedHistoryRide(null);
+          }}
+          onOpenNotifications={() =>
+            setMobileView(
+              nextPassengerMobileView(mobileView, "open-notifications"),
+            )
+          }
+          onOpenRide={(historyRide) => {
+            setSelectedHistoryRide(historyRide);
+            setMobileView(
+              nextPassengerMobileView(mobileView, "open-ride-details"),
+            );
+          }}
+        />
+      )}
       <nav
         className={`passenger-bottom-nav ${["searching", "accepted", "arrived", "riding"].includes(stage) ? "ride-critical" : ""}`}
         aria-label="Navegação principal"
       >
         <button
           type="button"
-          className={mobileNav === "home" ? "active" : ""}
+          className={activeMobileNav === "home" ? "active" : ""}
+          aria-current={activeMobileNav === "home" ? "page" : undefined}
           onClick={() => {
-            setMobileNav("home");
+            setMobileView(
+              nextPassengerMobileView(mobileView, "open-home"),
+            );
+            setSelectedHistoryRide(null);
             window.scrollTo({ top: 0, behavior: "smooth" });
           }}
         >
@@ -2055,10 +2611,13 @@ function PassengerPanel({ backend }: { backend: Backend }) {
         </button>
         <button
           type="button"
-          className={mobileNav === "rides" ? "active" : ""}
+          className={activeMobileNav === "rides" ? "active" : ""}
+          aria-current={activeMobileNav === "rides" ? "page" : undefined}
           onClick={() => {
-            setMobileNav("rides");
-            openPanel("passenger-history");
+            setSelectedHistoryRide(null);
+            setMobileView(
+              nextPassengerMobileView(mobileView, "open-rides"),
+            );
           }}
         >
           <History />
@@ -2066,38 +2625,17 @@ function PassengerPanel({ backend }: { backend: Backend }) {
         </button>
         <button
           type="button"
-          className={mobileNav === "coupons" ? "active" : ""}
+          className={activeMobileNav === "profile" ? "active" : ""}
+          aria-current={activeMobileNav === "profile" ? "page" : undefined}
           onClick={() => {
-            setMobileNav("coupons");
-            setNotice("Nenhum cupom disponível no momento.");
-          }}
-        >
-          <Ticket />
-          <span>Cupons</span>
-        </button>
-        <button
-          type="button"
-          className={mobileNav === "wallet" ? "active" : ""}
-          onClick={() => {
-            setMobileNav("wallet");
-            setNotice(
-              "Carteira e formas de pagamento estarão disponíveis aqui.",
+            setSelectedHistoryRide(null);
+            setMobileView(
+              nextPassengerMobileView(mobileView, "open-profile"),
             );
           }}
         >
-          <Wallet />
-          <span>Carteira</span>
-        </button>
-        <button
-          type="button"
-          className={mobileNav === "profile" ? "active" : ""}
-          onClick={() => {
-            setMobileNav("profile");
-            setNotice("Use o menu da conta no topo para acessar seu perfil.");
-          }}
-        >
           <UserRound />
-          <span>Perfil</span>
+          <span>Conta</span>
         </button>
       </nav>
       {destinationSearchOpen && (
@@ -2358,6 +2896,10 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const [offerSeconds, setOfferSeconds] = useState(0);
   const [liveLocation, setLiveLocation] = useState<LivePoint>();
   const [gpsStatus, setGpsStatus] = useState("GPS aguardando");
+  const [trackingEta, setTrackingEta] = useState<TrackingRoute | null>(null);
+  const [trackingEtaError, setTrackingEtaError] = useState("");
+  const etaCalculationRef = useRef<EtaCalculation | null>(null);
+  const backendRef = useRef(backend);
   const [editing, setEditing] = useState(false);
   const [avatar, setAvatar] = useState<File | null>(null);
   const [driverForm, setDriverForm] = useState({
@@ -2371,12 +2913,30 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const rideId = ride?.id;
   const updateLocation = backend.updateLocation;
   useEffect(() => {
-    if (!online || !("geolocation" in navigator)) return;
-    const activeInterval = rideId ? 5000 : 20000;
-    let lastSentAt = 0;
+    backendRef.current = backend;
+  }, [backend]);
+  useEffect(() => {
+    if (!online) return;
+    if (!("geolocation" in navigator)) {
+      const timer = window.setTimeout(
+        () => setGpsStatus("Este aparelho não oferece acesso ao GPS."),
+        0,
+      );
+      return () => window.clearTimeout(timer);
+    }
+    let lastSentSample: LocationSample | null = null;
     let sending = false;
     const watcher = navigator.geolocation.watchPosition(
       (position) => {
+        if (
+          !isValidCoordinates({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          })
+        ) {
+          setGpsStatus("O GPS retornou coordenadas inválidas.");
+          return;
+        }
         setLiveLocation({
           lat: position.coords.latitude,
           lng: position.coords.longitude,
@@ -2385,10 +2945,20 @@ function DriverPanel({ backend }: { backend: Backend }) {
         setGpsStatus(
           `GPS ativo · precisão ${Math.round(position.coords.accuracy)} m`,
         );
-        const now = Date.now();
-        if (sending || now - lastSentAt < activeInterval) return;
+        const sample: LocationSample = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracyMeters: position.coords.accuracy,
+          timestamp: position.timestamp,
+        };
+        if (
+          sending ||
+          !shouldSendLocationUpdate(lastSentSample, sample, Boolean(rideId))
+        ) {
+          return;
+        }
         sending = true;
-        lastSentAt = now;
+        lastSentSample = sample;
         void updateLocation(position, rideId)
           .catch((error) =>
             setGpsStatus(
@@ -2410,6 +2980,69 @@ function DriverPanel({ backend }: { backend: Backend }) {
     );
     return () => navigator.geolocation.clearWatch(watcher);
   }, [online, rideId, updateLocation]);
+  const driverLocation = backend.driverLocation;
+  useEffect(() => {
+    const phase = trackingPhase(ride?.status);
+    if (!ride || !phase) {
+      etaCalculationRef.current = null;
+      const timer = window.setTimeout(() => {
+        setTrackingEta(null);
+        setTrackingEtaError("");
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    const freshnessSeconds = driverLocation?.freshnessSeconds || 45;
+    if (
+      !driverLocation ||
+      driverLocation.stale ||
+      !isLocationFresh(driverLocation, freshnessSeconds)
+    ) {
+      const timer = window.setTimeout(() => {
+        setTrackingEta(null);
+        setTrackingEtaError(
+          driverLocation
+            ? "Sua localização está desatualizada."
+            : "Aguardando uma posição válida do GPS.",
+        );
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    if (
+      !shouldRecalculateEta(
+        etaCalculationRef.current,
+        phase,
+        driverLocation,
+      )
+    ) {
+      return;
+    }
+    let cancelled = false;
+    etaCalculationRef.current = {
+      phase,
+      location: driverLocation,
+      calculatedAt: Date.now(),
+    };
+    void backendRef.current
+      .trackingRoute(ride.id)
+      .then((result) => {
+        if (cancelled) return;
+        setTrackingEta(result);
+        setTrackingEtaError("");
+        etaCalculationRef.current = {
+          phase: result.phase,
+          location: driverLocation,
+          calculatedAt: Date.parse(result.calculatedAt) || Date.now(),
+        };
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTrackingEta(null);
+        setTrackingEtaError("Rota temporariamente indisponível.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [driverLocation, ride]);
   useEffect(() => {
     if (!offer) return;
     const update = () =>
@@ -2582,6 +3215,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
       }
     : undefined;
   const route = routePoints(shownRide?.route_geometry);
+  const navigationTarget = ride
+    ? externalNavigationTarget(ride.status, ride)
+    : null;
   return (
     <div className="driver-shell">
       <aside className="driver-sidebar">
@@ -2744,9 +3380,24 @@ function DriverPanel({ backend }: { backend: Backend }) {
             <ChevronRight />
           </button>
         </div>
-        {backend.driverHistory && (
+        {(backend.driverHistory ||
+          backend.driverHistoryLoading ||
+          backend.driverHistoryError) && (
           <details className="driver-earnings">
             <summary>MINHAS CORRIDAS / GANHOS</summary>
+            {backend.driverHistoryLoading ? (
+              <div className="panel-state" role="status">
+                Carregando suas corridas…
+              </div>
+            ) : backend.driverHistoryError ? (
+              <div className="panel-error" role="alert">
+                <p>{backend.driverHistoryError}</p>
+                <button type="button" onClick={backend.reloadDriverHistory}>
+                  Tentar novamente
+                </button>
+              </div>
+            ) : backend.driverHistory ? (
+              <>
             <div className="earnings-grid">
               <span>
                 <small>Hoje</small>
@@ -2763,7 +3414,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
             </div>
             <small>Valores brutos. Comissão ainda não configurada.</small>
             <div className="driver-history-list">
-              {backend.driverHistory.rides.slice(0, 10).map((item) => (
+              {backend.driverHistory.rides.length ? backend.driverHistory.rides.slice(0, 10).map((item) => (
                 <div key={item.id}>
                   <span>
                     {new Intl.DateTimeFormat("pt-BR", {
@@ -2772,12 +3423,13 @@ function DriverPanel({ backend }: { backend: Backend }) {
                   </span>
                   <b>{money(item.final_fare_cents ?? item.fare_cents)}</b>
                   <small>
-                    {item.payment?.method === "cash" ? "Dinheiro" : "Pix"} ·{" "}
-                    {paymentLabel(item.payment?.status)}
+                    {rideStatusLabel(item.status)} · Passageiro: {item.passenger_name || "Não informado"} · {item.payment?.method === "cash" ? "Dinheiro" : "Pix"} · {paymentLabel(item.payment?.status)}
                   </small>
                 </div>
-              ))}
+              )) : <p>Você ainda não possui corridas concluídas.</p>}
             </div>
+              </>
+            ) : null}
           </details>
         )}
         <NotificationsPanel backend={backend} />
@@ -2788,6 +3440,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
           destination={destination}
           driver={liveLocation}
           route={route}
+          connected={backend.realtimeStatus === "connected"}
         />
         {notice && <div className="backend-warning">{notice}</div>}
         {!online && (
@@ -2915,16 +3568,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
                     : ride.origin_address}
                 </b>
                 <span>
-                  Rota estimada:{" "}
-                  {(
-                    (ride.estimated_distance_meters || ride.distance_meters) /
-                    1000
-                  ).toFixed(1)}{" "}
-                  km ·{" "}
-                  {minutes(
-                    ride.estimated_duration_seconds || ride.duration_seconds,
-                  )}{" "}
-                  min
+                  {trackingEta
+                    ? `Rota atual: ${(trackingEta.distanceMeters / 1000).toFixed(1)} km · ${minutes(trackingEta.durationSeconds)} min`
+                    : trackingEtaError || "Calculando a rota atual…"}
                 </span>
                 {ride.status === "em_corrida" && (
                   <span>
@@ -2935,6 +3581,21 @@ function DriverPanel({ backend }: { backend: Backend }) {
               </div>
             </div>
             <div className="job-actions">
+              {navigationTarget && (
+                <Button
+                  disabled={busy}
+                  variant="outline"
+                  onClick={() =>
+                    window.open(
+                      navigationTarget.url,
+                      "_blank",
+                      "noopener,noreferrer",
+                    )
+                  }
+                >
+                  <Navigation /> ABRIR NAVEGAÇÃO
+                </Button>
+              )}
               {ride.status !== "em_corrida" && (
                 <Button disabled={busy} variant="outline" onClick={cancelRide}>
                   CANCELAR
@@ -4020,12 +4681,30 @@ export default function Home() {
               <a href="#destination-address">
                 <Bike /> Pedir corrida
               </a>
-              <a href="#passenger-history">
+              <button
+                type="button"
+                onClick={() => {
+                  document.dispatchEvent(new Event("moto-syxp:open-rides"));
+                  document
+                    .querySelector<HTMLDetailsElement>(".mobile-menu")
+                    ?.removeAttribute("open");
+                }}
+              >
                 <History /> Minhas corridas
-              </a>
-              <a href="#passenger-notifications">
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  document.dispatchEvent(
+                    new Event("moto-syxp:open-notifications"),
+                  );
+                  document
+                    .querySelector<HTMLDetailsElement>(".mobile-menu")
+                    ?.removeAttribute("open");
+                }}
+              >
                 <Bell /> Notificações
-              </a>
+              </button>
               <a href="mailto:suporte@motovip.app">
                 <Headphones /> Suporte
               </a>

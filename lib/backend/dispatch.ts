@@ -66,3 +66,10 @@ export async function assertFreshDriverLocation(supabase: SupabaseClient, driver
   const { data } = await supabase.from("driver_locations").select("updated_at").eq("driver_id", driverId).gte("updated_at", freshness).maybeSingle();
   if (!data) throw new ApiError(409, "Sua localização está desatualizada. Aguarde um novo sinal de GPS.", "STALE_DRIVER_LOCATION");
 }
+
+export async function expireRideSearches(supabase: SupabaseClient, rideId?: string) {
+  const { error } = await supabase.rpc("expire_ride_searches", {
+    p_ride_id: rideId || null,
+  });
+  if (error) throw new ApiError(503, "Não foi possível atualizar as ofertas agora.", "OFFER_EXPIRATION_UNAVAILABLE");
+}

@@ -1,4 +1,5 @@
 import { ApiError, audit, jsonError, requireUser } from "@/lib/backend/api";
+import { expireRideSearches } from "@/lib/backend/dispatch";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -11,6 +12,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       .select("id").maybeSingle();
     if (error) throw error;
     if (!data) throw new ApiError(409, "Esta oferta não está mais disponível.", "OFFER_UNAVAILABLE");
+    await expireRideSearches(supabase, id);
     await audit(supabase, user.id, "ride.declined", "ride", id);
     return Response.json({ declined: true, rideId: id });
   } catch (error) { return jsonError(error); }

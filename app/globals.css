@@ -2837,6 +2837,313 @@ select:focus-visible {
   }
 }
 
+/* ETAPA 6: navegação e painéis mobile acima do mapa, sem alterar o desktop. */
+.passenger-mobile-panel {
+  display: none;
+}
+
+.panel-error,
+.panel-state {
+  padding: 12px;
+  color: #65788e;
+  font-size: 11px;
+}
+
+.panel-error button {
+  min-height: 42px;
+  margin-top: 8px;
+  padding: 0 14px;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--blue);
+  font-weight: 800;
+}
+
+@media (max-width: 950px) {
+  .passenger-mobile-panel {
+    position: fixed;
+    z-index: 1150;
+    inset: 0 0 calc(76px + env(safe-area-inset-bottom));
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    background: #f6f7f8;
+    color: var(--vip-ink);
+    overscroll-behavior: contain;
+  }
+
+  .passenger-mobile-panel > header {
+    min-height: calc(68px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 12px 0;
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) 48px;
+    align-items: center;
+    gap: 8px;
+    background: #080909;
+    color: #fff;
+    border-bottom: 2px solid var(--vip-gold);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  }
+
+  .passenger-mobile-panel > header button {
+    width: 48px;
+    height: 48px;
+    border: 0;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    background: #202121;
+    color: #fff;
+  }
+
+  .passenger-mobile-panel > header button svg {
+    width: 22px;
+    transform: rotate(180deg);
+  }
+
+  .passenger-mobile-panel > header h2 {
+    margin: 0;
+    text-align: center;
+    font-size: 18px;
+  }
+
+  .passenger-mobile-panel-content {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    padding: 16px clamp(14px, 4vw, 26px)
+      max(24px, env(safe-area-inset-bottom));
+    scroll-padding-bottom: 96px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-panel-state {
+    min-height: min(52dvh, 420px);
+    padding: 30px;
+    border: 1px dashed #d7dce2;
+    border-radius: 22px;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 12px;
+    background: #fff;
+    text-align: center;
+    color: #667386;
+  }
+
+  .mobile-panel-state > svg {
+    width: 34px;
+    height: 34px;
+    color: #c89000;
+  }
+
+  .mobile-panel-state p {
+    margin: 0;
+  }
+
+  .mobile-history-list,
+  .mobile-notification-list,
+  .mobile-account-panel {
+    display: grid;
+    gap: 10px;
+  }
+
+  .mobile-history-list > button,
+  .mobile-account-panel > button {
+    width: 100%;
+    min-height: 82px;
+    padding: 13px 14px;
+    border: 1px solid #e0e3e8;
+    border-radius: 17px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 22px;
+    align-items: center;
+    gap: 10px;
+    background: #fff;
+    color: var(--vip-ink);
+    text-align: left;
+    box-shadow: 0 5px 16px rgba(10, 16, 38, 0.05);
+  }
+
+  .mobile-history-list > button > span,
+  .mobile-account-panel > button > span {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+  }
+
+  .mobile-history-list small,
+  .mobile-account-panel small,
+  .mobile-notification-list small {
+    color: #758095;
+    font-size: 11px;
+  }
+
+  .mobile-history-list b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+  }
+
+  .mobile-history-list em {
+    color: #966f00;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 750;
+  }
+
+  .mobile-history-list strong {
+    white-space: nowrap;
+    font-size: 13px;
+  }
+
+  .mobile-history-list svg,
+  .mobile-account-panel > button > svg:last-child {
+    width: 19px;
+    color: #9a7511;
+  }
+
+  .mobile-ride-details {
+    display: grid;
+    gap: 12px;
+  }
+
+  .mobile-ride-details > div,
+  .mobile-ride-details dl {
+    margin: 0;
+    padding: 17px;
+    border: 1px solid #e0e3e8;
+    border-radius: 18px;
+    display: grid;
+    gap: 6px;
+    background: #fff;
+  }
+
+  .mobile-ride-details small,
+  .mobile-ride-details dt {
+    color: #748095;
+    font-size: 11px;
+  }
+
+  .mobile-ride-details dl > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid #edf0f3;
+  }
+
+  .mobile-ride-details dl > div:last-child {
+    border-bottom: 0;
+  }
+
+  .mobile-ride-details dd {
+    margin: 0;
+    text-align: right;
+    font-weight: 750;
+  }
+
+  .mobile-account-identity {
+    min-height: 96px;
+    padding: 16px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    background: #0b0c0c;
+    color: #fff;
+  }
+
+  .mobile-account-identity > span {
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--vip-gold);
+    color: #0a0b0b;
+    font-weight: 900;
+  }
+
+  .mobile-account-identity > div {
+    display: grid;
+    gap: 3px;
+  }
+
+  .mobile-account-panel > button {
+    grid-template-columns: 28px minmax(0, 1fr) 22px;
+  }
+
+  .mobile-account-panel > button > svg:first-child {
+    width: 23px;
+    color: #b78600;
+  }
+
+  .mobile-notification-list > button {
+    width: 100%;
+    min-height: 76px;
+    padding: 14px;
+    border: 1px solid #dce3eb;
+    border-radius: 16px;
+    display: grid;
+    gap: 5px;
+    background: #edf5ff;
+    color: var(--vip-ink);
+    text-align: left;
+  }
+
+  .mobile-notification-list > button.read {
+    background: #fff;
+  }
+
+  .mobile-notification-list > .mark-all-read {
+    min-height: 48px;
+    background: #101111;
+    color: var(--vip-gold);
+    text-align: center;
+    font-weight: 800;
+  }
+
+  .passenger-bottom-nav {
+    z-index: 1200;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .passenger-bottom-nav button {
+    min-width: 48px;
+    min-height: 48px;
+    transition:
+      transform 100ms ease,
+      background-color 120ms ease,
+      color 120ms ease,
+      box-shadow 120ms ease;
+  }
+
+  .passenger-bottom-nav button.active {
+    box-shadow: inset 0 3px 0 var(--vip-gold);
+  }
+
+  .passenger-bottom-nav button:active,
+  .passenger-mobile-panel button:active,
+  .mobile-menu a:active,
+  .field-action:active,
+  .map-tools button:active {
+    transform: scale(0.96);
+    filter: brightness(0.94);
+  }
+}
+
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid #1e87ff;
+  outline-offset: 3px;
+}
+
 /* Mapa mobile: área útil, controles e marcadores sem conflito com os painéis. */
 .map-canvas {
   --map-safe-bottom: 74px;
@@ -3742,6 +4049,13 @@ select:focus-visible {
       100svh - 96px - 76px - env(safe-area-inset-top) -
         env(safe-area-inset-bottom)
     );
+  }
+}
+
+/* Mantém a navegação essencial da ETAPA 6 após as regras responsivas legadas. */
+@media (max-width: 950px) {
+  .app-role-passenger .passenger-bottom-nav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -5856,7 +6170,8 @@ select:focus-visible {
     background: #090a0a;
     box-shadow: 0 18px 35px rgba(0, 0, 0, 0.34);
   }
-  .mobile-menu nav a {
+  .mobile-menu nav a,
+  .mobile-menu nav button {
     min-height: 43px;
     padding: 0 10px;
     border-radius: 10px;
@@ -5867,7 +6182,14 @@ select:focus-visible {
     text-decoration: none;
     font-size: 12px;
   }
-  .mobile-menu nav a:hover {
+  .mobile-menu nav button {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    text-align: left;
+  }
+  .mobile-menu nav a:hover,
+  .mobile-menu nav button:hover {
     background: #1b1b1b;
     color: var(--vip-gold);
   }

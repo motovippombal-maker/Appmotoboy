@@ -2,6 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Layer, Map as LeafletMap, Marker } from "leaflet";
+import {
+  mapViewportKey,
+  shouldAutoFitViewport,
+} from "@/lib/map/viewport";
 
 export type LivePoint = { lat: number; lng: number; label?: string };
 
@@ -15,6 +19,8 @@ type RealMapProps = {
   route?: Array<[number, number]>;
   pickPoint?: LivePoint;
   onPick?: (point: LivePoint) => void;
+  centerTarget?: LivePoint;
+  centerRequest?: number;
 };
 
 const CITY_PLACES = [
@@ -49,6 +55,8 @@ export function RealMap({
   route,
   pickPoint,
   onPick,
+  centerTarget,
+  centerRequest = 0,
 }: RealMapProps) {
   const elementRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -59,12 +67,18 @@ export function RealMap({
   const driverMarkerRef = useRef<Marker | null>(null);
   const pickMarkerRef = useRef<Marker | null>(null);
   const onPickRef = useRef(onPick);
+  const centerTargetRef = useRef(centerTarget);
   const refitRef = useRef<() => void>(() => undefined);
+  const lastAutoFitKeyRef = useRef("");
   const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
     onPickRef.current = onPick;
   }, [onPick]);
+
+  useEffect(() => {
+    centerTargetRef.current = centerTarget;
+  }, [centerTarget]);
 
   useEffect(() => {
     if (!elementRef.current || mapRef.current) return;
@@ -130,7 +144,6 @@ export function RealMap({
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
         map.invalidateSize({ animate: false });
-        refitRef.current();
       });
     };
     const observer = new ResizeObserver(refresh);
@@ -149,6 +162,21 @@ export function RealMap({
       window.cancelAnimationFrame(frame);
     };
   }, [mapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || centerRequest <= 0) return;
+    const target = centerTargetRef.current;
+    if (target) {
+      map.flyTo(
+        [target.lat, target.lng],
+        Math.max(map.getZoom(), 16),
+        { duration: 0.55 },
+      );
+      return;
+    }
+    refitRef.current();
+  }, [centerRequest, mapReady]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -204,7 +232,7 @@ export function RealMap({
       layersRef.current.forEach((layer) => layer.remove());
       layersRef.current = [];
 
-      const importantPoints = [currentLocation, origin, destination, driver, ...nearbyDrivers].filter(
+      const importantPoints = [currentLocation, origin, destination, ...nearbyDrivers].filter(
         (point): point is LivePoint => Boolean(point),
       );
       placeMarkersRef.current.forEach(({ marker, point }) => {
@@ -278,8 +306,6 @@ export function RealMap({
         );
         route.forEach((point) => boundsPoints.push(point));
       }
-      if (driver) boundsPoints.push([driver.lat, driver.lng]);
-
       const refit = () => {
         if (!boundsPoints.length) return;
         if (boundsPoints.length === 1) {
@@ -296,12 +322,20 @@ export function RealMap({
         });
       };
       refitRef.current = refit;
-      window.requestAnimationFrame(refit);
+      const nextAutoFitKey = mapViewportKey({ origin, destination, route });
+      if (!nextAutoFitKey) {
+        lastAutoFitKeyRef.current = "";
+      } else if (
+        shouldAutoFitViewport(lastAutoFitKeyRef.current, nextAutoFitKey)
+      ) {
+        lastAutoFitKeyRef.current = nextAutoFitKey;
+        window.requestAnimationFrame(refit);
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [accuracyMeters, currentLocation, destination, driver, mapReady, nearbyDrivers, origin, route]);
+  }, [accuracyMeters, currentLocation, destination, mapReady, nearbyDrivers, origin, route]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -311,7 +345,9 @@ export function RealMap({
       driverMarkerRef.current = null;
       return;
     }
+    let cancelled = false;
     void import("leaflet").then((module) => {
+      if (cancelled) return;
       const L = module.default;
       if (driverMarkerRef.current) {
         driverMarkerRef.current.setLatLng([driver.lat, driver.lng]).setTooltipContent(driver.label || "Moto SyXp");
@@ -328,6 +364,9 @@ export function RealMap({
         if (!origin && !destination) map.flyTo([driver.lat, driver.lng], 16, { duration: 0.55 });
       }
     });
+    return () => {
+      cancelled = true;
+    };
   }, [destination, driver, mapReady, origin]);
 
   return (

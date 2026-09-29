@@ -2,20 +2,15 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ApiError } from "@/lib/backend/api";
-
-export type FareRegion = {
-  id: string;
-  name: string;
-  amount_cents: number;
-  active: boolean;
-  is_default: boolean;
-};
+import {
+  PricingRuleError,
+  resolveFareRule,
+  type Coordinates,
+  type FareRegionRule,
+  type ServiceAreaRule,
+} from "@/lib/backend/pricing-rules";
 
 type NominatimAddress = Record<string, string | undefined>;
-
-function normalize(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR").replace(/[^a-z0-9]+/g, " ").trim();
-}
 
 export function regionLabels(address: NominatimAddress = {}) {
   return [address.neighbourhood, address.suburb, address.quarter, address.city_district, address.village, address.town, address.hamlet]
@@ -35,22 +30,42 @@ export async function reverseDestination(lat: number, lng: number) {
   return { displayName: result.display_name, labels: regionLabels(result.address) };
 }
 
-export async function resolveRegionFare(supabase: SupabaseClient, address: string, labels: string[] = []) {
-  const { data, error } = await supabase.from("fare_regions").select("id,name,amount_cents,active,is_default").eq("active", true);
-  if (error) throw error;
-  const regions = (data || []) as FareRegion[];
-  const fallback = regions.find((region) => region.is_default);
-  if (!fallback) throw new ApiError(503, "A tarifa padrão da cidade não está ativa.", "DEFAULT_REGION_FARE_MISSING");
+export async function resolveTripFare(
+  supabase: SupabaseClient,
+  origin: Coordinates,
+  destination: Coordinates,
+) {
+  const [areasResult, regionsResult] = await Promise.all([
+    supabase
+      .from("service_areas")
+      .select(
+        "id,name,boundary,active,allow_origins,allow_destinations,priority,updated_at",
+      )
+      .eq("active", true),
+    supabase
+      .from("fare_regions")
+      .select(
+        "id,name,amount_cents,active,is_default,boundary,priority,updated_at",
+      )
+      .eq("active", true),
+  ]);
+  if (areasResult.error) throw areasResult.error;
+  if (regionsResult.error) throw regionsResult.error;
 
-  const candidates = [address, ...labels].map(normalize).filter(Boolean);
-  const matched = regions
-    .filter((region) => !region.is_default)
-    .sort((a, b) => normalize(b.name).length - normalize(a.name).length)
-    .find((region) => candidates.some((candidate) => candidate.includes(normalize(region.name))));
-  const selected = matched || fallback;
-  return {
-    fareCents: selected.amount_cents,
-    fareRegion: { id: selected.id, name: selected.name, isDefault: selected.is_default },
-    snapshot: { regionId: selected.id, regionName: selected.name, amountCents: selected.amount_cents, isDefault: selected.is_default },
-  };
+  try {
+    return resolveFareRule({
+      origin,
+      destination,
+      serviceAreas: (areasResult.data || []) as ServiceAreaRule[],
+      fareRegions: (regionsResult.data || []) as FareRegionRule[],
+    });
+  } catch (error) {
+    if (!(error instanceof PricingRuleError)) throw error;
+    const status = error.code.endsWith("NOT_CONFIGURED") || error.code.includes("CONFIGURATION") || error.code.endsWith("MISSING")
+      ? 503
+      : error.code === "INVALID_COORDINATES"
+        ? 400
+        : 422;
+    throw new ApiError(status, error.message, error.code);
+  }
 }
