@@ -136,7 +136,7 @@ export function RealMap({
       const map = L.map(elementRef.current, {
         zoomControl: false,
         attributionControl: true,
-        preferCanvas: true,
+        preferCanvas: false,
         rotate: true,
       }).setView([-10.8373, -38.5357], 14);
       if (diagnostics && process.env.NODE_ENV !== "production") {
@@ -199,7 +199,7 @@ export function RealMap({
       offlineLayerRef.current = null;
       if (offlineMapActive && offlineRoads) {
         const group = L.layerGroup().addTo(map);
-        const renderer = L.canvas({ padding: 0.2 });
+        const renderer = L.svg({ padding: 0.2 });
         if (!map.getPane("offlineRoadPane")) {
           const pane = map.createPane("offlineRoadPane");
           pane.style.zIndex = "210";
