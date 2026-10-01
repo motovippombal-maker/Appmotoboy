@@ -10,7 +10,7 @@
 .driver-map-layer .leaflet-control-layers, .driver-map-layer .leaflet-control-zoom { display: none; }
 .app-role-driver .driver-map-layer .route-marker.driver > span { border: 3px solid white; border-radius: 50%; background: #0867f7; color: white; box-shadow: 0 2px 8px #123a7240; }
 .app-role-driver .driver-map-layer .live-driver-marker b { display: none; }
-.app-role-driver .has-navigation .driver-map-layer .live-driver-marker span { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; }
+.app-role-driver .has-navigation .driver-map-layer .live-driver-marker span { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; transform: rotate(var(--moto-heading, 0deg)); transition: transform .35s ease; }
 .app-role-driver .has-navigation .driver-map-layer .live-driver-marker i { font-style: normal; font-size: 22px; }
 .driver-map-center { position: absolute; z-index: 21; right: max(13px, env(safe-area-inset-right)); bottom: calc(205px + env(safe-area-inset-bottom)); display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid #dce7f4; border-radius: 50%; background: white; color: #071b42; box-shadow: 0 2px 8px #001c3a30; }
 .driver-map-center svg { width: 21px; height: 21px; }

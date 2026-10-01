@@ -4557,7 +4557,9 @@ summary:focus-visible,
 .driver-nav-instruction span:not(.driver-nav-arrow) { font-size: clamp(17px, 3vw, 24px); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .driver-nav-sound { flex: none; width: 52px; height: 52px; border: 1px solid #77899d; border-radius: 14px; background: #172b41; color: #fff; display: grid; place-items: center; }
 .driver-nav-sound svg { width: 28px; height: 28px; }
-.driver-nav-alert { width: max-content; max-width: 100%; margin-top: 8px; border-radius: 8px; padding: 7px 12px; background: #071525; color: #fff; font-weight: 750; }
+.driver-nav-alert { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; width: max-content; max-width: 100%; margin-top: 8px; border-radius: 8px; padding: 7px 12px; background: #071525; color: #fff; font-weight: 750; }
+.driver-nav-alert button { border: 1px solid #82b7ff; border-radius: 7px; padding: 5px 9px; background: #0b5fdc; color: #fff; font: inherit; cursor: pointer; }
+.driver-nav-alert button:disabled { opacity: .65; cursor: wait; }
 .driver-nav-bottom { bottom: 0; background: #071525; border-top: 3px solid var(--syxp-gold); padding: 14px max(14px, env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); box-shadow: 0 -8px 30px rgba(0,0,0,.28); }
 .driver-nav-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: clamp(15px, 3vw, 20px); }
 .driver-nav-summary strong { color: var(--syxp-gold); font-size: clamp(25px, 5vw, 36px); }

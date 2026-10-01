@@ -3505,6 +3505,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const [rerouting, setRerouting] = useState(false);
   const [navClock, setNavClock] = useState(0);
   const [gpsStatus, setGpsStatus] = useState("GPS aguardando");
+  const [gpsRetrying, setGpsRetrying] = useState(false);
   const [trackingEta, setTrackingEta] = useState<TrackingRoute | null>(null);
   const [trackingEtaError, setTrackingEtaError] = useState("");
   const etaCalculationRef = useRef<EtaCalculation | null>(null);
@@ -3657,6 +3658,45 @@ function DriverPanel({ backend }: { backend: Backend }) {
     );
     return () => navigator.geolocation.clearWatch(watcher);
   }, [online, updateLocation]);
+  const retryGps = () => {
+    if (!("geolocation" in navigator)) {
+      setGpsStatus("Este aparelho não oferece acesso ao GPS.");
+      return;
+    }
+    setGpsRetrying(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const point = { lat: position.coords.latitude, lng: position.coords.longitude, label: "Sua localização" };
+        if (!isValidCoordinates(point)) {
+          setGpsStatus("O GPS retornou coordenadas inválidas.");
+          setGpsRetrying(false);
+          return;
+        }
+        previousGpsRef.current = point;
+        setLiveLocation(point);
+        setNavSample({ accuracy: position.coords.accuracy, speed: position.coords.speed,
+          heading: position.coords.heading, timestamp: position.timestamp });
+        setGpsStatus(`GPS ativo · precisão ${Math.round(position.coords.accuracy)} m`);
+        const currentRideId = rideIdRef.current;
+        if (currentRideId) {
+          void updateOfflineRide(currentRideId, (data) => ({ ...data, lastKnownPosition: {
+            lat: point.lat, lng: point.lng, accuracy: position.coords.accuracy, timestamp: position.timestamp,
+          } })).catch(() => undefined);
+        }
+        void updateLocation(position, currentRideId).catch(() => undefined);
+        setGpsRetrying(false);
+      },
+      (error) => {
+        setGpsStatus(error.code === 1
+          ? "Permita a localização nas configurações do navegador para navegar."
+          : error.code === 3
+            ? "O GPS demorou para responder. Confira a localização do aparelho e tente novamente."
+            : "GPS indisponível no momento; confira a localização do aparelho.");
+        setGpsRetrying(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
+    );
+  };
   useEffect(() => {
     if (!rideId) return;
     const first = window.setTimeout(() => setNavClock(Date.now()), 0);
@@ -3784,6 +3824,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
     ? Math.max(0, backend.cancellationPolicy.no_show_seconds - Math.floor((navClock - Date.parse(ride.arrival_server_at)) / 1000))
     : null;
   const gpsWeak = !navSample || navClock - navSample.timestamp > 15_000 || navSample.accuracy > 80;
+  const gpsAlert = gpsStatus === "GPS aguardando" || gpsStatus.startsWith("GPS ativo")
+    ? "Aguardando uma posição recente do GPS. Confira a permissão de localização."
+    : gpsStatus;
   const pickupNavigationReady = Boolean(ride?.status === "aceita" && liveLocation && !gpsWeak && navEta && navigationRoute.length > 1 &&
     navigationTargetPoint && isValidCoordinates(liveLocation) && isValidCoordinates(navigationTargetPoint));
   const arrivalReady = Boolean(ride?.status === "motorista_a_caminho" && liveLocation && !gpsWeak &&
@@ -4533,6 +4576,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
             centerTarget={liveLocation}
             centerRequest={navigationCenterRequest}
             onNavigationInteraction={ride && navPhase ? () => setFollowDriver(false) : undefined}
+            offlineRoads={roadGraph?.data}
+            offlineMapActive={connectivity === "OFFLINE"}
             diagnostics
           />
         </div>
@@ -4548,7 +4593,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
               <div className="driver-nav-instruction">
                 <span className="driver-nav-arrow" aria-hidden="true">{maneuverSymbol(upcomingManeuver?.step)}</span>
                 <div>
-                  <strong>{ride.status === "motorista_chegou" ? "Você chegou" : distanceToTarget <= 45 ? "Local de chegada próximo" : upcomingManeuver ? `Em ${formatNavDistance(upcomingManeuver.distanceMeters)}` : "Siga pela rota"}</strong>
+                  <strong>{ride.status === "motorista_chegou" ? "Você chegou" : !gpsWeak && distanceToTarget <= 45 ? "Local de chegada próximo" : upcomingManeuver ? `Em ${formatNavDistance(upcomingManeuver.distanceMeters)}` : "Siga pela rota"}</strong>
                   <span>{ride.status === "motorista_chegou" ? "Aguarde o embarque" : upcomingManeuver ? maneuverText(upcomingManeuver.step) : navPhase === "pickup" ? ride.origin_address : ride.destination_address}</span>
                 </div>
                 <button type="button" className="driver-nav-sound" aria-label={voiceOn ? "Desligar som" : "Ligar som"} aria-pressed={voiceOn} onClick={() => {
@@ -4557,7 +4602,10 @@ function DriverPanel({ backend }: { backend: Backend }) {
                   setVoiceOn(!voiceOn);
                 }}>{voiceOn ? <Volume2 /> : <VolumeX />}</button>
               </div>
-              {(gpsWeak || rerouting || trackingEtaError) && <div className="driver-nav-alert" role="status">{rerouting ? "Recalculando rota…" : gpsWeak ? "Localização temporariamente indisponível. Última posição conhecida no mapa." : trackingEtaError}</div>}
+              {(gpsWeak || rerouting || trackingEtaError) && <div className="driver-nav-alert" role="status">
+                <span>{rerouting ? "Recalculando rota…" : gpsWeak ? gpsAlert : trackingEtaError}</span>
+                {gpsWeak && <button type="button" onClick={retryGps} disabled={gpsRetrying}>{gpsRetrying ? "Buscando GPS…" : "Tentar GPS"}</button>}
+              </div>}
             </div>
             <div className="driver-nav-floats">
               <button type="button" aria-label={voiceOn ? "Desligar orientação por voz" : "Ligar orientação por voz"} onClick={() => { if (voiceOn) window.speechSynthesis?.cancel(); announcedRef.current.clear(); setVoiceOn(!voiceOn); }}>{voiceOn ? <Volume2 /> : <VolumeX />}</button>
@@ -4571,7 +4619,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
             <div className="driver-nav-bottom">
               <div className="driver-nav-summary">
                 <strong>{navEta ? `${minutes(Math.round(navEta.durationSeconds * Math.min(1, (navigationProgress?.remainingMeters ?? navEta.distanceMeters) / Math.max(1, navEta.distanceMeters))))} min` : gpsWeak ? "Obtendo localização…" : "Calculando…"}</strong>
-                <span>{navEta ? formatNavDistance(navigationProgress?.remainingMeters ?? navEta.distanceMeters) : trackingEtaError || "Calculando rota…"}</span>
+                <span>{navEta ? formatNavDistance(navigationProgress?.remainingMeters ?? navEta.distanceMeters) : gpsWeak ? gpsAlert : trackingEtaError || "Calculando rota…"}</span>
                 <span>{ride.status === "aceita" ? "Corrida aceita · preparando rota" : ride.status === "motorista_chegou" ? "Aguardando passageiro" : navPhase === "pickup" ? "Indo buscar o passageiro" : "Em corrida para o destino"}</span>
               </div>
               {navPhase === "trip" && connectivity === "ONLINE" && Number(ride.tracked_distance_meters) > 0 && <div className="driver-nav-trip">Percorrido pelo GPS: {(Number(ride.tracked_distance_meters) / 1000).toFixed(2).replace(".", ",")} km</div>}

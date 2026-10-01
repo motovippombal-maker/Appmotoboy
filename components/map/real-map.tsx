@@ -104,6 +104,7 @@ export function RealMap({
   const refitRef = useRef<() => void>(() => undefined);
   const lastAutoFitKeyRef = useRef("");
   const [mapReady, setMapReady] = useState(false);
+  const [tileUnavailable, setTileUnavailable] = useState(false);
   const offlineLayerRef = useRef<Layer | null>(null);
   const trackingBadgeTitle = trackingBadge?.title;
   const trackingBadgeDetail = trackingBadge?.detail;
@@ -129,15 +130,14 @@ export function RealMap({
   useEffect(() => {
     if (!elementRef.current || mapRef.current) return;
     let disposed = false;
+    let tileFallbackTimer = 0;
     void import("leaflet").then(async (module) => {
-      await import("@tomickigrzegorz/leaflet-rotate");
       if (disposed || !elementRef.current) return;
       const L = module.default;
       const map = L.map(elementRef.current, {
         zoomControl: false,
         attributionControl: true,
         preferCanvas: false,
-        rotate: true,
       }).setView([-10.8373, -38.5357], 14);
       if (diagnostics && process.env.NODE_ENV !== "production") {
         const bounds = elementRef.current.getBoundingClientRect();
@@ -146,26 +146,37 @@ export function RealMap({
       const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
         attribution: "© OpenStreetMap",
-      }).addTo(map);
+      });
       const contrast = L.tileLayer("https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", {
         maxZoom: 19,
         attribution: "© OpenStreetMap, Tiles HOT",
       });
-      if (diagnostics) {
-        let tileErrors = 0;
-        street.on("load", () => {
-          tileErrors = 0;
-          if (process.env.NODE_ENV !== "production") console.info("[DRIVER_MAP] tiles loaded");
-        });
-        street.on("tileerror", (event) => {
-          console.error("[DRIVER_MAP] tile error", event);
-          tileErrors += 1;
-          if (tileErrors >= 3 && map.hasLayer(street)) {
-            map.removeLayer(street);
-            contrast.addTo(map);
-          }
-        });
-      }
+      let streetErrors = 0;
+      let contrastErrors = 0;
+      const tileLoaded = () => {
+        window.clearTimeout(tileFallbackTimer);
+        if (!disposed) setTileUnavailable(false);
+        if (diagnostics && process.env.NODE_ENV !== "production") console.info("[DRIVER_MAP] tile loaded");
+      };
+      street.on("tileload", tileLoaded);
+      contrast.on("tileload", tileLoaded);
+      street.on("tileerror", (event) => {
+        if (diagnostics) console.error("[DRIVER_MAP] street tile error", event);
+        streetErrors += 1;
+        if (streetErrors >= 3 && map.hasLayer(street)) {
+          map.removeLayer(street);
+          contrast.addTo(map);
+        }
+      });
+      contrast.on("tileerror", (event) => {
+        if (diagnostics) console.error("[DRIVER_MAP] contrast tile error", event);
+        contrastErrors += 1;
+        if (contrastErrors >= 3 && !disposed) setTileUnavailable(true);
+      });
+      tileFallbackTimer = window.setTimeout(() => {
+        if (!disposed) setTileUnavailable(true);
+      }, 12000);
+      street.addTo(map);
       L.control.layers({ Mapa: street, "Alto contraste": contrast }, undefined, { position: "topright" }).addTo(map);
       L.control.zoom({ position: "bottomright" }).addTo(map);
       const updateZoomClass = () => elementRef.current?.classList.toggle("map-zoom-close", map.getZoom() >= 15);
@@ -178,6 +189,7 @@ export function RealMap({
     });
     return () => {
       disposed = true;
+      window.clearTimeout(tileFallbackTimer);
       driverMarkerRef.current = null;
       driverMarkerModeRef.current = null;
       pickMarkerRef.current = null;
@@ -197,7 +209,7 @@ export function RealMap({
       const L = module.default;
       offlineLayerRef.current?.remove();
       offlineLayerRef.current = null;
-      if (offlineMapActive && offlineRoads) {
+      if ((offlineMapActive || tileUnavailable) && offlineRoads) {
         const group = L.layerGroup().addTo(map);
         const renderer = L.svg({ padding: 0.2 });
         if (!map.getPane("offlineRoadPane")) {
@@ -229,7 +241,7 @@ export function RealMap({
       }
     });
     return () => { cancelled = true; };
-  }, [mapReady, offlineMapActive, offlineRoads]);
+  }, [mapReady, offlineMapActive, offlineRoads, tileUnavailable]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -536,11 +548,8 @@ export function RealMap({
     } else {
       map.panTo(position, { animate: true, duration: 0.5 });
     }
-    if (navigation.heading !== null && Number.isFinite(navigation.heading)) {
-      map.setHeading(navigation.heading, { ease: 0.22, deadzone: 2 });
-    }
     const icon = driverMarkerRef.current?.getElement();
-    icon?.style.setProperty("--moto-heading", "0deg");
+    icon?.style.setProperty("--moto-heading", `${navigation.heading ?? 0}deg`);
   }, [mapReady, navigation, navigationFollow]);
 
   return (
