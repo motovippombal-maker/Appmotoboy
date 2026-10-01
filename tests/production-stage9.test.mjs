@@ -48,6 +48,7 @@ async function serviceWorkerHarness(responseHeaders = {}, network = { status: 20
   const sent = [];
   const opened = [];
   const fetches = [];
+  let skipWaitingCount = 0;
   const keyFor = (request) => new URL(request.url || request, "https://app.test").href;
   const caches = {
     async open(name) {
@@ -70,7 +71,7 @@ async function serviceWorkerHarness(responseHeaders = {}, network = { status: 20
   const self = {
     location: { origin: "https://app.test" },
     addEventListener(name, handler) { handlers.set(name, handler); },
-    skipWaiting() {},
+    skipWaiting() { skipWaitingCount += 1; },
     clients: {
       claim: async () => {},
       matchAll: async () => [],
@@ -90,6 +91,7 @@ async function serviceWorkerHarness(responseHeaders = {}, network = { status: 20
   });
   return {
     handlers, cacheStores, sent, opened, fetches,
+    get skipWaitingCount() { return skipWaitingCount; },
     async fetch(pathname, options = {}) {
       const request = {
         url: `https://app.test${pathname}`,
@@ -197,7 +199,8 @@ test("7. administração não entra no cache", async () => {
   assert.equal(await worker.fetch("/admin/export.js"), null);
 });
 test("8. asset permitido é cacheado; resposta private não é", async () => {
-  const staticCacheName = (await source("public/sw.js")).match(/const STATIC_CACHE = "([^"]+)"/)?.[1];
+  const buildId = (await source("public/sw.js")).match(/const SW_BUILD_ID = "([^"]+)"/)?.[1];
+  const staticCacheName = `moto-pombal-static-${buildId}`;
   assert.ok(staticCacheName);
   const allowed = await serviceWorkerHarness();
   await allowed.fetch("/_next/static/chunk.js");
@@ -214,7 +217,8 @@ test("8. asset permitido é cacheado; resposta private não é", async () => {
   assert.equal(allowed.cacheStores.has("other-app-cache"), true);
 });
 test("8a. instalação guarda os chunks iniciais e abertura usa shell em falha de rede", async () => {
-  const staticCacheName = (await source("public/sw.js")).match(/const STATIC_CACHE = "([^"]+)"/)?.[1];
+  const buildId = (await source("public/sw.js")).match(/const SW_BUILD_ID = "([^"]+)"/)?.[1];
+  const staticCacheName = `moto-pombal-static-${buildId}`;
   assert.ok(staticCacheName);
   const network = { status: 200 };
   const worker = await serviceWorkerHarness({}, network);
@@ -222,6 +226,9 @@ test("8a. instalação guarda os chunks iniciais e abertura usa shell em falha d
   worker.handlers.get("install")({ waitUntil(promise) { installing = promise; } });
   await installing;
   assert.ok(worker.cacheStores.get(staticCacheName)?.has("https://app.test/_next/static/chunks/shell.js"));
+  assert.equal(worker.skipWaitingCount, 0, "o SW novo deve aguardar o botão ATUALIZAR");
+  worker.handlers.get("message")({ data: { type: "SKIP_WAITING" } });
+  assert.equal(worker.skipWaitingCount, 1);
   network.status = 503;
   assert.equal((await worker.fetch("/", { mode: "navigate" })).ok, true);
   network.status = 404;

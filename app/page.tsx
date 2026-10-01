@@ -3509,6 +3509,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const [trackingEtaError, setTrackingEtaError] = useState("");
   const etaCalculationRef = useRef<EtaCalculation | null>(null);
   const etaInFlightKeyRef = useRef("");
+  const etaFailuresRef = useRef(0);
   const lastSavedPositionRef = useRef(0);
   const lastNavigationTargetRef = useRef("");
   const backendRef = useRef(backend);
@@ -3669,6 +3670,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
       lastNavigationTargetRef.current = targetKey;
       etaCalculationRef.current = null;
       etaInFlightKeyRef.current = "";
+      etaFailuresRef.current = 0;
     }
     if (!ride || !phase) {
       etaCalculationRef.current = null;
@@ -3676,6 +3678,13 @@ function DriverPanel({ backend }: { backend: Backend }) {
         setTrackingEta(null);
         setTrackingEtaError("");
       }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    const routeTarget = phase === "trip"
+      ? { lat: ride.destination_lat, lng: ride.destination_lng }
+      : { lat: ride.origin_lat, lng: ride.origin_lng };
+    if (!isValidCoordinates(routeTarget) || (routeTarget.lat === 0 && routeTarget.lng === 0)) {
+      const timer = window.setTimeout(() => setTrackingEtaError("O ponto da corrida não possui coordenadas válidas."), 0);
       return () => window.clearTimeout(timer);
     }
     const routeLocation = liveLocation && navSample && Date.now() - navSample.timestamp < 15_000
@@ -3716,6 +3725,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
         if (process.env.NODE_ENV !== "production") console.info("[ROUTE_A_RESPONSE]", { phase: result.phase, distanceMeters: result.distanceMeters, durationSeconds: result.durationSeconds, geometryPresent: Boolean(result.geometry) });
         setTrackingEta(result);
         setTrackingEtaError("");
+        etaFailuresRef.current = 0;
         etaCalculationRef.current = {
           phase: result.phase,
           location: routeLocation,
@@ -3724,7 +3734,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
       })
       .catch(async (error: unknown) => {
         if (lastNavigationTargetRef.current !== targetKey) return;
-        etaCalculationRef.current = { phase, location: routeLocation, calculatedAt: Date.now() };
+        etaFailuresRef.current += 1;
+        const retryDelay = etaFailuresRef.current === 1 ? 3_000 : etaFailuresRef.current === 2 ? 8_000 : 45_000;
+        etaCalculationRef.current = { phase, location: routeLocation, calculatedAt: Date.now() - (45_000 - retryDelay) };
         if (process.env.NODE_ENV !== "production") console.error("[ROUTE_A_RESPONSE] falha", error);
         try {
           const graph = roadGraph || await loadRegionPackage();
@@ -3741,7 +3753,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
             return;
           }
         } catch { /* Sem cobertura local: manter o erro original da rota online. */ }
-        setTrackingEtaError(error instanceof Error ? error.message : "Rota temporariamente indisponível.");
+        setTrackingEtaError(etaFailuresRef.current < 3 ? "" : error instanceof Error ? error.message : "Rota temporariamente indisponível.");
       }).finally(() => {
         if (etaInFlightKeyRef.current === requestKey) etaInFlightKeyRef.current = "";
       });
@@ -3772,6 +3784,10 @@ function DriverPanel({ backend }: { backend: Backend }) {
     ? Math.max(0, backend.cancellationPolicy.no_show_seconds - Math.floor((navClock - Date.parse(ride.arrival_server_at)) / 1000))
     : null;
   const gpsWeak = !navSample || navClock - navSample.timestamp > 15_000 || navSample.accuracy > 80;
+  const pickupNavigationReady = Boolean(ride?.status === "aceita" && liveLocation && !gpsWeak && navEta && navigationRoute.length > 1 &&
+    navigationTargetPoint && isValidCoordinates(liveLocation) && isValidCoordinates(navigationTargetPoint));
+  const arrivalReady = Boolean(ride?.status === "motorista_a_caminho" && liveLocation && !gpsWeak &&
+    navEta && navigationRoute.length > 1 && distanceToTarget <= backend.cancellationPolicy.arrival_radius_meters);
   const navDestination = useMemo(() => targetLat !== undefined && targetLng !== undefined
     ? { lat: targetLat, lng: targetLng, label: navPhase === "pickup" ? "Passageiro" : "Destino" }
     : undefined, [targetLat, targetLng, navPhase]);
@@ -4009,18 +4025,19 @@ function DriverPanel({ backend }: { backend: Backend }) {
       setBusy(false);
     }
   }
-  async function prepareNavigationForRide(acceptedRide: Ride, routeActivated: boolean) {
+  async function prepareNavigationForRide(acceptedRide: Ride) {
     if (!driverId) throw new Error("Sessão do motorista indisponível.");
     let point: { lat: number; lng: number };
-    if (liveLocation) point = liveLocation;
+    if (liveLocation && navSample && Date.now() - navSample.timestamp < 15_000 && navSample.accuracy <= 80) point = liveLocation;
     else {
       const position = await gpsPosition();
       point = { lat: position.coords.latitude, lng: position.coords.longitude };
     }
+    if (!isValidCoordinates(point)) throw new Error("Aguardando uma posição válida do GPS.");
     const graph = roadGraph || await loadRegionPackage().catch(() => null);
     if (graph) setRoadGraph(graph);
     const prepared = await backend.prepareNavigation(acceptedRide.id, { lat: point.lat, lng: point.lng }).catch(() => null);
-    const baseRide = { ...(prepared?.ride || acceptedRide), driver_id: driverId, status: routeActivated ? "motorista_a_caminho" : "aceita" };
+    const baseRide = { ...(prepared?.ride || acceptedRide), driver_id: driverId, status: "aceita" };
     const pickupPoint = { lat: baseRide.origin_lat, lng: baseRide.origin_lng };
     const destinationPoint = { lat: baseRide.destination_lat, lng: baseRide.destination_lng };
     const pickup = savedRoute(prepared?.routeToPickup || graph?.route(point, pickupPoint, "pickup") || null);
@@ -4032,7 +4049,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
     if (confirmed && confirmed.ride?.id !== acceptedRide.id)
       throw new Error("A corrida foi encerrada antes de iniciar a navegação.");
     await saveOfflineRide(data);
-    setOfflinePackage(routeActivated ? data : await queueOfflineTransition(data.ride.id, "RIDE_EN_ROUTE", { lat: point.lat, lng: point.lng }));
+    setOfflinePackage(data);
     if ((!pickup || !trip || !mapReady) && !navigator.onLine) {
       setNotice("Corrida aceita. O pacote offline ainda não cobre toda esta rota; mantenha a conexão para navegar com segurança.");
     }
@@ -4046,16 +4063,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
     closeRideOfferNotification(offer.ride_id);
     try {
       await backend.acceptRide(offer.ride_id);
-      let routeActivated = false;
-      try {
-        await backend.transitionRide(offer.ride_id, "motorista_a_caminho");
-        routeActivated = true;
-      } catch {
-        setNotice("Corrida aceita. Confirme o deslocamento se o estado ainda não atualizar.");
-      }
       await backend.refresh();
       try {
-        await prepareNavigationForRide(offer.ride, routeActivated);
+        await prepareNavigationForRide(offer.ride);
       } catch (error) {
         setNotice(error instanceof Error ? `Corrida aceita. ${error.message}` : "Corrida aceita. Navegação offline indisponível neste momento.");
       }
@@ -4113,6 +4123,14 @@ function DriverPanel({ backend }: { backend: Backend }) {
   async function advance() {
     if (!ride) return;
     if (offlineConflict) { setNotice(offlineConflict); return; }
+    if (ride.status === "aceita" && !pickupNavigationReady) {
+      setNotice("Aguarde uma posição atual do GPS e a rota até o passageiro antes de sair.");
+      return;
+    }
+    if (ride.status === "motorista_a_caminho" && !arrivalReady) {
+      setNotice("A chegada exige GPS atual, rota válida e proximidade do embarque.");
+      return;
+    }
     const next: Record<string, string> = {
       aceita: "motorista_a_caminho",
       motorista_a_caminho: "motorista_chegou",
@@ -4523,7 +4541,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
           <section className="driver-navigation" aria-label="Navegação da corrida">
             <div className="driver-nav-top">
               <div className="driver-nav-toolbar">
-                <div className="driver-nav-stage">{ride.status === "motorista_chegou" ? "AGUARDANDO PASSAGEIRO" : navPhase === "pickup" ? "INDO BUSCAR PASSAGEIRO" : "LEVANDO AO DESTINO"}</div>
+                <div className="driver-nav-stage">{ride.status === "aceita" ? "PREPARANDO NAVEGAÇÃO" : ride.status === "motorista_chegou" ? "AGUARDANDO PASSAGEIRO" : navPhase === "pickup" ? "INDO BUSCAR PASSAGEIRO" : "LEVANDO AO DESTINO"}</div>
                 {connectivity !== "ONLINE" && <span className={`driver-nav-connection ${connectivity.toLowerCase()}`} role="status">{connectivity === "OFFLINE" ? navigator.onLine ? "Servidor indisponível" : "Navegação offline" : connectivity === "RECOVERING" ? "Reconectando…" : "Conexão fraca"}</span>}
                 <button type="button" className="driver-nav-exit" onClick={() => { setDriverView("menu"); setMenuOpen(true); }} aria-label="Abrir menu do motorista"><Menu /></button>
               </div>
@@ -4552,14 +4570,14 @@ function DriverPanel({ backend }: { backend: Backend }) {
             }}><Crosshair /></button>
             <div className="driver-nav-bottom">
               <div className="driver-nav-summary">
-                <strong>{navEta ? `${minutes(Math.round(navEta.durationSeconds * Math.min(1, (navigationProgress?.remainingMeters ?? navEta.distanceMeters) / Math.max(1, navEta.distanceMeters))))} min` : "— min"}</strong>
+                <strong>{navEta ? `${minutes(Math.round(navEta.durationSeconds * Math.min(1, (navigationProgress?.remainingMeters ?? navEta.distanceMeters) / Math.max(1, navEta.distanceMeters))))} min` : gpsWeak ? "Obtendo localização…" : "Calculando…"}</strong>
                 <span>{navEta ? formatNavDistance(navigationProgress?.remainingMeters ?? navEta.distanceMeters) : trackingEtaError || "Calculando rota…"}</span>
-                <span>{ride.status === "motorista_chegou" ? "Aguardando passageiro" : navPhase === "pickup" ? "Indo buscar o passageiro" : "Em corrida para o destino"}</span>
+                <span>{ride.status === "aceita" ? "Corrida aceita · preparando rota" : ride.status === "motorista_chegou" ? "Aguardando passageiro" : navPhase === "pickup" ? "Indo buscar o passageiro" : "Em corrida para o destino"}</span>
               </div>
               {navPhase === "trip" && connectivity === "ONLINE" && Number(ride.tracked_distance_meters) > 0 && <div className="driver-nav-trip">Percorrido pelo GPS: {(Number(ride.tracked_distance_meters) / 1000).toFixed(2).replace(".", ",")} km</div>}
               <div className="driver-nav-actions">
                 <button type="button" className="driver-nav-primary"
-                  disabled={busy || (ride.status === "motorista_a_caminho" && (gpsWeak || distanceToTarget > backend.cancellationPolicy.arrival_radius_meters))}
+                  disabled={busy || (ride.status === "aceita" && !pickupNavigationReady) || (ride.status === "motorista_a_caminho" && !arrivalReady)}
                   onClick={advance}>{ride.status === "aceita" ? "Ir até passageiro" : ride.status === "motorista_a_caminho" ? "Cheguei" : ride.status === "motorista_chegou" ? "Iniciar corrida" : "Finalizar corrida"}</button>
               </div>
               {ride.status === "motorista_a_caminho" && distanceToTarget > backend.cancellationPolicy.arrival_radius_meters &&
@@ -4770,7 +4788,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
                   CANCELAR
                 </Button>
               )}
-              <Button disabled={busy} className="primary-cta" onClick={advance}>
+              <Button disabled={busy || (ride.status === "aceita" && !pickupNavigationReady) || (ride.status === "motorista_a_caminho" && !arrivalReady)} className="primary-cta" onClick={advance}>
                 {ride.status === "aceita"
                   ? "IR ATÉ PASSAGEIRO"
                   : ride.status === "motorista_a_caminho"

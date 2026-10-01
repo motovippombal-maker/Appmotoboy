@@ -385,7 +385,7 @@ export function RealMap({
         );
         boundsPoints.push([destination.lat, destination.lng]);
       }
-      if (trackingBadgeTitle && driverBoundsRef.current) {
+      if ((trackingBadgeTitle || navigationMode) && driverBoundsRef.current) {
         boundsPoints.push([driverBoundsRef.current.lat, driverBoundsRef.current.lng]);
       }
       landmarks.forEach((point) => {
@@ -452,7 +452,10 @@ export function RealMap({
         ? `tracking:${origin?.lat ?? ""}:${origin?.lng ?? ""}:${destination?.lat ?? ""}:${destination?.lng ?? ""}:${route?.length ? "route" : "waiting"}`
         : mapViewportKey({ origin, destination, route });
       if (navigationMode) {
-        lastAutoFitKeyRef.current = nextAutoFitKey;
+        if (shouldAutoFitViewport(lastAutoFitKeyRef.current, nextAutoFitKey)) {
+          lastAutoFitKeyRef.current = nextAutoFitKey;
+          window.requestAnimationFrame(refit);
+        }
       } else if (!nextAutoFitKey) {
         lastAutoFitKeyRef.current = "";
       } else if (

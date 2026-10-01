@@ -1,5 +1,6 @@
-const SHELL_CACHE = "moto-pombal-shell-v11";
-const STATIC_CACHE = "moto-pombal-static-v11";
+const SW_BUILD_ID = "cfbbe5fc2c7d";
+const SHELL_CACHE = `moto-pombal-shell-${SW_BUILD_ID}`;
+const STATIC_CACHE = `moto-pombal-static-${SW_BUILD_ID}`;
 const REGION_CACHE = "moto-pombal-region-packages";
 const SHELL_ASSETS = [
   "/",
@@ -34,7 +35,8 @@ self.addEventListener("install", (event) => {
           if (response.ok) await staticCache.put(path, response);
         }));
       }
-      await self.skipWaiting();
+      // Em atualizações, aguarde a escolha do usuário no botão ATUALIZAR.
+      // Na primeira instalação não há controlador anterior e a ativação é automática.
     })(),
   );
 });

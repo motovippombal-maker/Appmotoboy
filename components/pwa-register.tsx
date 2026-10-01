@@ -57,6 +57,7 @@ export function PwaRegister() {
         registration.addEventListener("updatefound", () =>
           watchWorker(registration?.installing),
         );
+        watchWorker(registration.installing);
       } catch {
         // O aplicativo continua utilizavel no navegador sem suporte a instalacao.
       }
