@@ -23,14 +23,15 @@ async function parse(response: Response): Promise<RoadGraph> {
 export async function loadRegionPackage(): Promise<RoadGraph> {
   if (loaded) return loaded;
   loaded = (async () => {
-    const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(OFFLINE_REGION.packageUrl);
+    // A blocked/full Cache Storage must not prevent the online map package from loading.
+    const cache = await caches.open(CACHE_NAME).catch(() => null);
+    const cached = await cache?.match(OFFLINE_REGION.packageUrl).catch(() => null);
     if (cached) {
-      try { return await parse(cached); } catch { await cache.delete(OFFLINE_REGION.packageUrl); }
+      try { return await parse(cached); } catch { await cache?.delete(OFFLINE_REGION.packageUrl).catch(() => undefined); }
     }
     const response = await fetch(OFFLINE_REGION.packageUrl, { cache: "no-cache" });
     const graph = await parse(response.clone());
-    await cache.put(OFFLINE_REGION.packageUrl, response);
+    await cache?.put(OFFLINE_REGION.packageUrl, response).catch(() => undefined);
     return graph;
   })().catch((error) => { loaded = null; throw error; });
   return loaded;

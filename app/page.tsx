@@ -3649,7 +3649,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
       },
       (error) => setGpsStatus(error.code === 1
         ? "Permita o GPS para mostrar sua posição, estimar chegada e navegar."
-        : "GPS indisponível no momento; confira a localização do aparelho."),
+        : error.code === 3
+          ? "O GPS demorou para responder. Confira a localização do aparelho e tente novamente."
+          : "GPS indisponível no momento; confira a localização do aparelho."),
       {
         enableHighAccuracy: true,
         maximumAge: 3000,
@@ -3839,6 +3841,22 @@ function DriverPanel({ backend }: { backend: Backend }) {
     heading: navSample?.heading ?? null,
     zoom: navigationZoom(navSample?.speed ?? null, upcomingManeuver?.distanceMeters ?? null),
   } : undefined, [liveLocation, navSample?.heading, navSample?.speed, upcomingManeuver?.distanceMeters]);
+  useEffect(() => {
+    if (!ride || offlinePackage?.ride.id !== ride.id || offlinePackage.mapReady || !roadGraph ||
+      !liveLocation || !navSample || gpsWeak) return;
+    const pickupPoint = { lat: ride.origin_lat, lng: ride.origin_lng };
+    const destinationPoint = { lat: ride.destination_lat, lng: ride.destination_lng };
+    if (![liveLocation, pickupPoint, destinationPoint].every((point) => isInsideRegion(point.lat, point.lng))) return;
+    const pickup = savedRoute(roadGraph.route(liveLocation, pickupPoint, "pickup"));
+    const trip = offlinePackage.routeToDestination || savedRoute(roadGraph.route(pickupPoint, destinationPoint, "trip"));
+    if (!pickup || !trip) return;
+    void updateOfflineRide(ride.id, (data) => ({ ...data, routeToPickup: pickup,
+      routeToDestination: trip, mapReady: true,
+      lastKnownPosition: { lat: liveLocation.lat, lng: liveLocation.lng,
+        accuracy: navSample.accuracy, timestamp: navSample.timestamp },
+    })).then((updated) => { if (updated && rideIdRef.current === ride.id) setOfflinePackage(updated); })
+      .catch(() => undefined);
+  }, [ride, offlinePackage, roadGraph, liveLocation, navSample, gpsWeak]);
   useEffect(() => {
     if (!ride || !navPhase || offRouteMeters === undefined || !navSample || gpsWeak || rerouting) return;
     if (lastDeviationSampleRef.current === navSample.timestamp) return;
@@ -4070,30 +4088,32 @@ function DriverPanel({ backend }: { backend: Backend }) {
   }
   async function prepareNavigationForRide(acceptedRide: Ride) {
     if (!driverId) throw new Error("Sessão do motorista indisponível.");
-    let point: { lat: number; lng: number };
-    if (liveLocation && navSample && Date.now() - navSample.timestamp < 15_000 && navSample.accuracy <= 80) point = liveLocation;
-    else {
-      const position = await gpsPosition();
-      point = { lat: position.coords.latitude, lng: position.coords.longitude };
-    }
-    if (!isValidCoordinates(point)) throw new Error("Aguardando uma posição válida do GPS.");
+    // Accepting a ride must not wait for a fresh GPS fix. The watch keeps trying;
+    // the last known point is only a route preview, never a live GPS report.
+    const point = liveLocation && isValidCoordinates(liveLocation) ? liveLocation : null;
+    const freshPoint = point && navSample && Date.now() - navSample.timestamp < 15_000 && navSample.accuracy <= 80
+      ? point : null;
     const graph = roadGraph || await loadRegionPackage().catch(() => null);
     if (graph) setRoadGraph(graph);
-    const prepared = await backend.prepareNavigation(acceptedRide.id, { lat: point.lat, lng: point.lng }).catch(() => null);
+    const prepared = freshPoint
+      ? await backend.prepareNavigation(acceptedRide.id, { lat: freshPoint.lat, lng: freshPoint.lng }).catch(() => null)
+      : null;
     const baseRide = { ...(prepared?.ride || acceptedRide), driver_id: driverId, status: "aceita" };
     const pickupPoint = { lat: baseRide.origin_lat, lng: baseRide.origin_lng };
     const destinationPoint = { lat: baseRide.destination_lat, lng: baseRide.destination_lng };
-    const pickup = savedRoute(prepared?.routeToPickup || graph?.route(point, pickupPoint, "pickup") || null);
+    const pickup = savedRoute(prepared?.routeToPickup || (point && graph?.route(point, pickupPoint, "pickup")) || null);
     const trip = savedRoute(prepared?.routeToDestination || graph?.route(pickupPoint, destinationPoint, "trip") ||
       (baseRide.route_geometry ? { phase: "trip" as const, geometry: baseRide.route_geometry, distanceMeters: baseRide.distance_meters, durationSeconds: baseRide.duration_seconds, steps: [] } : null));
-    const mapReady = Boolean(graph && [point, pickupPoint, destinationPoint].every((item) => isInsideRegion(item.lat, item.lng)));
+    const mapReady = Boolean(freshPoint && graph && [freshPoint, pickupPoint, destinationPoint].every((item) => isInsideRegion(item.lat, item.lng)));
     const data = makeOfflineRide(baseRide, driverId, pickup, trip, mapReady);
     const confirmed = await backend.getRideSnapshot().catch(() => null);
     if (confirmed && confirmed.ride?.id !== acceptedRide.id)
       throw new Error("A corrida foi encerrada antes de iniciar a navegação.");
     await saveOfflineRide(data);
     setOfflinePackage(data);
-    if ((!pickup || !trip || !mapReady) && !navigator.onLine) {
+    if (!freshPoint) {
+      setNotice("Corrida aceita. O aparelho ainda não forneceu GPS atual; o mapa mostra apenas uma prévia da rota.");
+    } else if ((!pickup || !trip || !mapReady) && !navigator.onLine) {
       setNotice("Corrida aceita. O pacote offline ainda não cobre toda esta rota; mantenha a conexão para navegar com segurança.");
     }
     return Boolean(pickup && trip && mapReady);

@@ -209,13 +209,16 @@ export function RealMap({
       const L = module.default;
       offlineLayerRef.current?.remove();
       offlineLayerRef.current = null;
-      if ((offlineMapActive || tileUnavailable) && offlineRoads) {
-        const group = L.layerGroup().addTo(map);
-        const renderer = L.svg({ padding: 0.2 });
+      if (offlineRoads) {
+        // Keep local streets beneath the online tiles. They remain visible wherever
+        // a tile is missing, including a partial tile failure after an earlier load.
         if (!map.getPane("offlineRoadPane")) {
           const pane = map.createPane("offlineRoadPane");
-          pane.style.zIndex = "210";
+          pane.style.zIndex = "190";
+          pane.style.pointerEvents = "none";
         }
+        const group = L.layerGroup().addTo(map);
+        const renderer = L.svg({ padding: 0.2, pane: "offlineRoadPane" });
         for (const road of offlineRoads.roads) {
           const points = road.nodes.map((id) => offlineRoads.nodes[id]).filter(Boolean) as [number, number][];
           if (points.length < 2) continue;
@@ -223,16 +226,18 @@ export function RealMap({
           L.polyline(points, { renderer, pane: "offlineRoadPane", color: major ? "#e5b96b" : "#ffffff", weight: major ? 4 : 2.6,
             opacity: 1, interactive: false }).addTo(group);
         }
-        const labels = new Set<string>();
-        for (const road of offlineRoads.roads) {
-          if (!road.name || labels.has(road.name) || labels.size >= 65 || road.nodes.length < 5) continue;
-          labels.add(road.name);
-          const point = offlineRoads.nodes[road.nodes[Math.floor(road.nodes.length / 2)]];
-          if (!point) continue;
-          L.marker(point, { interactive: false, icon: L.divIcon({ className: "offline-road-name", html: safeMarkerLabel(road.name), iconSize: [100, 14], iconAnchor: [50, 7] }) }).addTo(group);
-        }
-        for (const place of offlineRoads.places || []) {
-          L.marker([place.lat, place.lng], { interactive: false, icon: L.divIcon({ className: "offline-place-name", html: safeMarkerLabel(place.name), iconSize: [120, 20], iconAnchor: [60, 10] }) }).addTo(group);
+        if (offlineMapActive || tileUnavailable) {
+          const labels = new Set<string>();
+          for (const road of offlineRoads.roads) {
+            if (!road.name || labels.has(road.name) || labels.size >= 65 || road.nodes.length < 5) continue;
+            labels.add(road.name);
+            const point = offlineRoads.nodes[road.nodes[Math.floor(road.nodes.length / 2)]];
+            if (!point) continue;
+            L.marker(point, { interactive: false, icon: L.divIcon({ className: "offline-road-name", html: safeMarkerLabel(road.name), iconSize: [100, 14], iconAnchor: [50, 7] }) }).addTo(group);
+          }
+          for (const place of offlineRoads.places || []) {
+            L.marker([place.lat, place.lng], { interactive: false, icon: L.divIcon({ className: "offline-place-name", html: safeMarkerLabel(place.name), iconSize: [120, 20], iconAnchor: [60, 10] }) }).addTo(group);
+          }
         }
         offlineLayerRef.current = group;
         map.attributionControl?.addAttribution('<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors · ODbL</a>');
