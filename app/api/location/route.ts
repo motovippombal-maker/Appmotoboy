@@ -1,14 +1,18 @@
 import { z } from "zod";
 import { ApiError, consumeRateLimit, jsonError, requireUser } from "@/lib/backend/api";
 import { distanceKm } from "@/lib/backend/routing";
+import { driverLocationRpcArgs } from "@/lib/backend/driver-location-rpc";
 
 const schema = z.object({ latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180), accuracyMeters: z.number().finite().nonnegative().max(10000).optional(), heading: z.number().finite().min(0).max(360).optional(), speedMps: z.number().finite().nonnegative().max(100).optional(), rideId: z.string().uuid().optional(), recordedAt: z.string().datetime().optional() });
 
 export async function POST(request: Request) {
   try {
-    const { supabase, user, profile } = await requireUser(request, ["passenger", "driver"]);
-    await consumeRateLimit(supabase, `location:${user.id}`, 20, 60);
+    const { supabase, user, profile } = await requireUser(request, ["passenger", "driver"], { allowBlocked: true });
+    // Um motorista pode manter a corrida aberta em mais de uma aba/aparelho.
+    // O limite anterior (20/min) rejeitava posições válidas durante a navegação.
+    await consumeRateLimit(supabase, `location:${user.id}`, profile.role === "driver" ? 90 : 30, 60);
     const input = schema.parse(await request.json());
+    if (profile.blocked && !input.rideId) throw new ApiError(403, "Conta bloqueada.", "ACCOUNT_BLOCKED");
     let rideStatus: string | null = null;
     if (input.rideId) {
       const ownerColumn = profile.role === "driver" ? "driver_id" : "passenger_id";
@@ -18,7 +22,7 @@ export async function POST(request: Request) {
     }
     if (profile.role === "driver") {
       const { data: driver } = await supabase.from("drivers").select("approval_status, online").eq("profile_id", user.id).single();
-      if (driver?.approval_status !== "approved" || !driver.online) throw new ApiError(403, "Fique online para compartilhar sua localização.", "DRIVER_OFFLINE");
+      if (!profile.blocked && (driver?.approval_status !== "approved" || !driver.online)) throw new ApiError(403, "Fique online para compartilhar sua localização.", "DRIVER_OFFLINE");
     }
     const receivedAt = new Date();
     const recordedAt = input.recordedAt ? new Date(input.recordedAt) : receivedAt;
@@ -31,18 +35,23 @@ export async function POST(request: Request) {
     }
     let locationApplied = true;
     if (profile.role === "driver") {
-      const { data, error } = await supabase.rpc("upsert_driver_location_if_newer", {
-        p_driver_id: user.id,
-        p_ride_id: input.rideId || null,
-        p_latitude: input.latitude,
-        p_longitude: input.longitude,
-        p_accuracy_meters: input.accuracyMeters,
-        p_heading: input.heading,
-        p_speed_mps: input.speedMps,
-        p_recorded_at: recordedAt.toISOString(),
-      });
+      const { data, error } = await supabase.rpc("upsert_driver_location_if_newer", driverLocationRpcArgs({
+        driverId: user.id, rideId: input.rideId, latitude: input.latitude,
+        longitude: input.longitude, accuracyMeters: input.accuracyMeters,
+        heading: input.heading, speedMps: input.speedMps, recordedAt: recordedAt.toISOString(),
+      }));
       if (error) throw error;
       locationApplied = Boolean(data);
+      if (locationApplied && input.rideId && ["aceita", "motorista_a_caminho", "motorista_chegou"].includes(rideStatus || "")
+        && input.accuracyMeters !== undefined && input.accuracyMeters <= 40) {
+        const { error: approachError } = await supabase.from("ride_approach_points").insert({
+          ride_id: input.rideId, driver_id: user.id, latitude: input.latitude,
+          longitude: input.longitude, accuracy_meters: input.accuracyMeters,
+        });
+        // A gravação auxiliar não pode derrubar a posição principal.
+        if (approachError && approachError.code !== "42P01")
+          console.error("[GPS] approach sample rejected", approachError.code);
+      }
     } else {
       const result = await supabase.from("passenger_locations").upsert({ passenger_id: user.id, latitude: input.latitude, longitude: input.longitude, accuracy_meters: input.accuracyMeters, ride_id: input.rideId || null, updated_at: receivedAt.toISOString() });
       if (result.error) throw result.error;

@@ -8,7 +8,7 @@ import {
 const CITY = { lat: -10.8373, lng: -38.5357 };
 const LOCAL_VIEWBOX = "-38.72,-10.69,-38.35,-10.99";
 const headers = {
-  "User-Agent": "MotoVIP/1.0 (Ribeira do Pombal passenger app)",
+  "User-Agent": "MotoPombal/1.0 (Ribeira do Pombal passenger app)",
   "Accept-Language": "pt-BR,pt;q=0.9",
 };
 const searchCache = new Map<

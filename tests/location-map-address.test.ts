@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import path from "node:path";
 
 import { ApiError } from "../lib/backend/errors";
 import {
@@ -20,6 +22,7 @@ import {
   mapViewportKey,
   shouldAutoFitViewport,
 } from "../lib/map/viewport";
+import { routeChevrons } from "../lib/map/route-chevrons";
 
 const normalizedResult: AddressResult = {
   id: "provider-result",
@@ -142,6 +145,17 @@ test("9. nova rota válida solicita enquadramento de origem e destino", () => {
   assert.equal(shouldAutoFitViewport(previous, next), true);
 });
 
+test("9a. chevrons ficam espaçados na geometria real e acompanham as curvas", () => {
+  const arrows = routeChevrons([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }], 50);
+  assert.equal(arrows.length, 3);
+  assert.ok(arrows[0][1].x > arrows[0][0].x);
+  assert.ok(arrows[2][1].y > arrows[2][0].y);
+  assert.ok(arrows.every((arrow) => arrow.every((point) =>
+    Math.min(Math.abs(point.y), Math.abs(point.x - 100)) <= 3.3,
+  )));
+  assert.deepEqual(routeChevrons([{ x: 0, y: 0 }, { x: 20, y: 0 }]), []);
+});
+
 test("10. falha do OSRM não fabrica distância ou duração", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => {
@@ -224,4 +238,47 @@ test("12. rua com número ausente retorna resultado marcado como aproximado", as
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+const source = (file: string) => readFile(path.join(process.cwd(), file), "utf8");
+
+test("13. ponto predefinido usa latitude e longitude salvas sem geocodificar novamente", async () => {
+  const page = await source("app/page.tsx");
+  const start = page.indexOf("function chooseQuickPlace");
+  const end = page.indexOf("\n  function ", start + 1);
+  const handler = page.slice(start, end);
+  assert.match(handler, /lat: place\.latitude/);
+  assert.match(handler, /lng: place\.longitude/);
+  assert.match(handler, /setDestinationPoint\(result\)/);
+  assert.match(handler, /calculate\(result\)/);
+  assert.doesNotMatch(handler, /chooseDestination|searchAddresses|geocod/i);
+});
+
+test("14. estimativa e criação da corrida preservam a coordenada oficial do destino", async () => {
+  const estimate = await source("app/api/maps/estimate/route.ts");
+  assert.match(estimate, /if \(input\.lat !== undefined && input\.lng !== undefined\) return \{ address: input\.address, lat: input\.lat, lng: input\.lng \}/);
+  const request = await source("app/api/rides/request/route.ts");
+  assert.match(request, /destination_lat: input\.destination\.lat/);
+  assert.match(request, /destination_lng: input\.destination\.lng/);
+});
+
+test("15. somente pontos ativos chegam ao passageiro", async () => {
+  const route = await source("app/api/quick-places/route.ts");
+  assert.match(route, /\.eq\("active", true\)/);
+});
+
+test("16. mapa não mantém marcadores de cidade com coordenadas duplicadas no código", async () => {
+  const map = await source("components/map/real-map.tsx");
+  assert.doesNotMatch(map, /CITY_PLACES|placeMarkersRef/);
+  assert.match(map, /draggable: true/);
+  assert.match(map, /marker\.on\("dragend"/);
+});
+
+test("17. painel exige confirmação do PIN e grava a coordenada escolhida", async () => {
+  const page = await source("app/page.tsx");
+  assert.match(page, /DEFINIR LOCALIZAÇÃO NO MAPA/);
+  assert.match(page, /locationVerified: true/);
+  assert.match(page, /<RealMap pickPoint=\{quickPlaceMapPoint\} onPick=\{setQuickPlaceMapPoint\}/);
+  const adminRoute = await source("app/api/admin/quick-places/route.ts");
+  assert.match(adminRoute, /input\.active && !input\.locationVerified/);
 });

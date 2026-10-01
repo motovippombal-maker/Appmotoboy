@@ -11,6 +11,8 @@ type CouponRow = {
   min_fare_cents: number;
   starts_at: string | null;
   ends_at: string | null;
+  usage_limit: number | null;
+  updated_at: string;
 };
 
 export type CouponResult = {
@@ -20,6 +22,7 @@ export type CouponResult = {
   originalFareCents: number;
   discountCents: number;
   fareCents: number;
+  revision: string;
 };
 
 export async function applyCoupon(
@@ -34,7 +37,7 @@ export async function applyCoupon(
   const { data, error } = await supabase
     .from("coupons")
     .select(
-      "id,code,description,discount_type,discount_value,max_discount_cents,min_fare_cents,starts_at,ends_at",
+      "id,code,description,discount_type,discount_value,max_discount_cents,min_fare_cents,starts_at,ends_at,usage_limit,updated_at",
     )
     .eq("code", code)
     .eq("active", true)
@@ -60,6 +63,14 @@ export async function applyCoupon(
   if ((userUses || 0) > 0)
     throw new ApiError(409, "Você já utilizou este cupom.", "COUPON_ALREADY_USED");
 
+  const { count: totalUses, error: totalError } = await supabase
+    .from("coupon_redemptions")
+    .select("id", { count: "exact", head: true })
+    .eq("coupon_id", coupon.id);
+  if (totalError) throw totalError;
+  if (coupon.usage_limit !== null && (totalUses || 0) >= coupon.usage_limit)
+    throw new ApiError(409, "Este cupom atingiu o limite de uso.", "COUPON_LIMIT_REACHED");
+
   let discountCents =
     coupon.discount_type === "fixed"
       ? coupon.discount_value
@@ -77,5 +88,6 @@ export async function applyCoupon(
     originalFareCents: fareCents,
     discountCents,
     fareCents: fareCents - discountCents,
+    revision: `${coupon.id}:${coupon.updated_at}:${totalUses || 0}`,
   };
 }

@@ -1,6 +1,7 @@
 import { jsonError, requireUser } from "@/lib/backend/api";
 import { expireRideSearches, getDispatchSettings } from "@/lib/backend/dispatch";
 import { distanceKm } from "@/lib/backend/routing";
+import { parseCancellationPolicy } from "@/lib/backend/cancellation-policy";
 
 async function signedAvatar(supabase: Awaited<ReturnType<typeof requireUser>>["supabase"], path?: string | null) {
   if (!path) return null;
@@ -10,25 +11,43 @@ async function signedAvatar(supabase: Awaited<ReturnType<typeof requireUser>>["s
 
 export async function GET(request: Request) {
   try {
-    const { supabase, user, profile } = await requireUser(request, ["passenger", "driver"]);
+    const { supabase, user, profile } = await requireUser(request, ["passenger", "driver"], { allowBlocked: true });
     await expireRideSearches(supabase);
     const ownerColumn = profile.role === "driver" ? "driver_id" : "passenger_id";
     const { data: activeRide, error } = await supabase.from("rides").select("*").eq(ownerColumn, user.id).not("status", "in", "(finalizada,cancelada)").order("created_at", { ascending: false }).limit(1).maybeSingle();
     if (error) throw error;
+    const { data: policySetting } = await supabase.from("system_settings").select("value")
+      .eq("key", "cancellation_policy").maybeSingle();
+    const cancellationPolicy = parseCancellationPolicy(policySetting?.value);
     let completedRide = null;
-    if (!activeRide && profile.role === "passenger") {
-      const { data, error: completedError } = await supabase.from("rides").select("*").eq("passenger_id", user.id).eq("status", "finalizada").order("completed_at", { ascending: false }).limit(1).maybeSingle();
+    let cancelledRide = null;
+    if (!activeRide) {
+      const completedQuery = supabase.from("rides").select("*")
+        .eq(ownerColumn, user.id)
+        .eq("status", "finalizada")
+        .order("completed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const { data, error: completedError } = await completedQuery;
       if (completedError) throw completedError;
       completedRide = data;
+      if (profile.role === "driver") {
+        const { data: cancelled, error: cancelledError } = await supabase.from("rides")
+          .select("id,driver_id,passenger_id,status,cancelled_at,cancelled_by,cancellation_fee_cents,cancellation_fee_reason")
+          .eq("driver_id", user.id).eq("status", "cancelada")
+          .order("cancelled_at", { ascending: false }).limit(1).maybeSingle();
+        if (cancelledError) throw cancelledError;
+        cancelledRide = cancelled;
+      }
     }
     const ride = activeRide || completedRide;
-    if (!ride) return Response.json({ ride: null, completedRide: null, driverLocation: null });
+    if (!ride) return Response.json({ ride: null, completedRide: null, cancelledRide, driverLocation: null, cancellationPolicy });
 
     let driver = null;
     let driverLocation = null;
     if (ride.driver_id) {
       const [{ data: driverRow }, { data: driverProfile }, { data: vehicle }, { data: location }] = await Promise.all([
-        supabase.from("drivers").select("profile_id,rating").eq("profile_id", ride.driver_id).single(),
+        supabase.from("drivers").select("profile_id,rating,trips_count").eq("profile_id", ride.driver_id).single(),
         supabase.from("profiles").select("full_name,phone,avatar_url").eq("id", ride.driver_id).single(),
         supabase.from("vehicles").select("brand,model,color,plate").eq("driver_id", ride.driver_id).eq("active", true).order("created_at", { ascending: false }).limit(1).maybeSingle(),
         supabase.from("driver_locations").select("latitude,longitude,accuracy_meters,updated_at").eq("driver_id", ride.driver_id).maybeSingle(),
@@ -65,6 +84,6 @@ export async function GET(request: Request) {
       }
     }
     const hydratedRide = { ...ride, tracked_distance_meters: trackedDistanceMeters, driver, passenger: passengerProfile || null };
-    return Response.json({ ride: activeRide ? hydratedRide : null, completedRide: completedRide ? hydratedRide : null, driverLocation: activeRide ? driverLocation : null });
+    return Response.json({ ride: activeRide ? hydratedRide : null, completedRide: completedRide ? hydratedRide : null, cancelledRide, driverLocation: activeRide ? driverLocation : null, cancellationPolicy });
   } catch (error) { return jsonError(error); }
 }

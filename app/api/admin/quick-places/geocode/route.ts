@@ -1,14 +1,14 @@
 import { z } from "zod";
-import { ApiError, consumeRateLimit, jsonError, requireUser } from "@/lib/backend/api";
+import { ApiError, consumeRateLimit, jsonError, requireAdmin } from "@/lib/backend/api";
 
 export async function POST(request: Request) {
   try {
-    const { supabase, user } = await requireUser(request, ["admin"]);
+    const { supabase, user } = await requireAdmin(request);
     await consumeRateLimit(supabase, `admin-geocode:${user.id}`, 20, 60);
     const { address } = z.object({ address: z.string().trim().min(5).max(240) }).parse(await request.json());
     const query = encodeURIComponent(`${address}, Ribeira do Pombal, Bahia, Brasil`);
     const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&countrycodes=br&q=${query}`, {
-      headers: { "User-Agent": "MotoVIP/1.0", "Accept-Language": "pt-BR" },
+      headers: { "User-Agent": "MotoPombal/1.0", "Accept-Language": "pt-BR" },
       cache: "no-store",
       signal: AbortSignal.timeout(8000),
     });

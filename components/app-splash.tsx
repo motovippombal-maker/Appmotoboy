@@ -20,17 +20,14 @@ export function AppSplash() {
   }, []);
   if (!visible) return null;
   return (
-    <div className="app-splash" role="status" aria-label="Abrindo Moto SyXp">
+    <div className="app-splash" role="status" aria-label="Abrindo MotoPombal">
       <Image
-        src="/gosyxp-logo.png"
-        alt="GoSyXP"
+        src="/brand/motopombal-wordmark.png"
+        alt="MotoPombal"
         width={300}
-        height={100}
+        height={150}
         priority
       />
-      <strong>
-        Moto <b>SyXp</b>
-      </strong>
       <span>Mobilidade rápida e segura</span>
       <i />
     </div>

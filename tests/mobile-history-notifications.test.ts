@@ -104,6 +104,17 @@ test("12. toque em botão ou aba possui feedback visual imediato", () => {
   assert.match(cssSource, /transform:\s*scale\(0\.96\)/);
 });
 
+test("12a. tocar no ponto de partida solicita o GPS e mantém busca manual disponível", () => {
+  assert.match(
+    pageSource,
+    /className="motovip-address-pickup"[\s\S]*?onClick=\{\(\) => void requestCurrentLocation\(\)\}/,
+  );
+  assert.match(pageSource, /aria-busy=\{gpsBusy\}/);
+  assert.match(pageSource, /Obtendo sua localização…/);
+  assert.match(pageSource, /setSheetMode\("expanded"\);[\s\S]*?setGpsBusy\(false\)/);
+  assert.match(pageSource, /onUseGps=\{requestCurrentLocation\}/);
+});
+
 test("13. painel com teclado virtual mantém conteúdo e ações roláveis", () => {
   assert.match(
     cssSource,

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ApiError, audit, consumeRateLimit, jsonError, requireUser } from "@/lib/backend/api";
+import { ApiError, audit, consumeRateLimit, jsonError, requireAdmin } from "@/lib/backend/api";
 
 const schema = z.object({
   id: z.string().uuid().optional(),
@@ -10,7 +10,7 @@ const schema = z.object({
 
 export async function GET(request: Request) {
   try {
-    const { supabase } = await requireUser(request, ["admin"]);
+    const { supabase } = await requireAdmin(request);
     const { data, error } = await supabase.from("fare_regions").select("id,name,amount_cents,active,is_default,updated_at").order("is_default", { ascending: false }).order("name");
     if (error) throw error;
     return Response.json({ regions: data || [] });
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { supabase, user } = await requireUser(request, ["admin"]);
+    const { supabase, user } = await requireAdmin(request);
     await consumeRateLimit(supabase, `admin-fare-regions:${user.id}`, 30, 60);
     const input = schema.parse(await request.json());
     let region;

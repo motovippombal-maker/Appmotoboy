@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { shouldReloadForWorkerChange } from "@/lib/pwa/update";
+
+const SW_RELOAD_STORAGE_KEY = "moto-syxp:last-sw-reload";
 
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -18,6 +21,7 @@ export function PwaRegister() {
   );
   const [networkState, setNetworkState] = useState<NetworkState>("online");
   const reloading = useRef(false);
+  const updateRequested = useRef(false);
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
@@ -46,6 +50,7 @@ export function PwaRegister() {
     const register = async () => {
       try {
         registration = await navigator.serviceWorker.register("/sw.js", {
+          scope: "/",
           updateViaCache: "none",
         });
         if (registration.waiting) setWaitingWorker(registration.waiting);
@@ -85,10 +90,21 @@ export function PwaRegister() {
       if (!document.hidden) void registration?.update();
     };
     const controllerChange = () => {
-      if (!reloading.current) {
-        reloading.current = true;
-        window.location.reload();
+      // A primeira instalação também dispara controllerchange. Não interrompa a
+      // página do usuário com uma recarga que pode falhar durante uma oscilação.
+      if (!updateRequested.current || reloading.current || !navigator.onLine) return;
+      reloading.current = true;
+      try {
+        const now = Date.now();
+        if (!shouldReloadForWorkerChange(window.sessionStorage.getItem(SW_RELOAD_STORAGE_KEY), now)) {
+          reloading.current = false;
+          return;
+        }
+        window.sessionStorage.setItem(SW_RELOAD_STORAGE_KEY, String(now));
+      } catch {
+        // O ref ainda impede recargas repetidas quando sessionStorage está indisponível.
       }
+      window.location.reload();
     };
 
     window.addEventListener("beforeinstallprompt", beforeInstall);
@@ -128,6 +144,7 @@ export function PwaRegister() {
   }
 
   function update() {
+    updateRequested.current = true;
     waitingWorker?.postMessage({ type: "SKIP_WAITING" });
     setWaitingWorker(null);
   }
@@ -162,7 +179,7 @@ export function PwaRegister() {
       )}
       {installPrompt && (
         <div className="pwa-notice install">
-          <span>Instale o Moto SyXp neste aparelho</span>
+          <span>Instale o MotoPombal neste aparelho</span>
           <button onClick={install}>INSTALAR</button>
         </div>
       )}

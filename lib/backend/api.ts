@@ -2,20 +2,18 @@ import type { User } from "@supabase/supabase-js";
 import { ZodError } from "zod";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
 import { ApiError } from "@/lib/backend/errors";
+import { assertProfileAccess, bearerToken, type AppRole } from "@/lib/backend/authorization";
 
 export { ApiError } from "@/lib/backend/errors";
 
-export type AppRole = "passenger" | "driver" | "admin";
+export type { AppRole } from "@/lib/backend/authorization";
 
-export async function requireUser(request: Request, roles?: AppRole[]) {
-  const value = request.headers.get("authorization");
-  const token = value?.startsWith("Bearer ") ? value.slice(7) : null;
-  if (!token)
-    throw new ApiError(
-      401,
-      "Entre na sua conta para continuar.",
-      "AUTH_REQUIRED",
-    );
+export async function requireUser(
+  request: Request,
+  roles?: AppRole[],
+  options: { allowBlocked?: boolean } = {},
+) {
+  const token = bearerToken(request);
 
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase.auth.getUser(token);
@@ -29,18 +27,7 @@ export async function requireUser(request: Request, roles?: AppRole[]) {
     .single();
   if (profileError || !profile)
     throw new ApiError(403, "Perfil não configurado.", "PROFILE_MISSING");
-  if (profile.blocked)
-    throw new ApiError(
-      403,
-      "Conta bloqueada. Procure a central.",
-      "ACCOUNT_BLOCKED",
-    );
-  if (roles && !roles.includes(profile.role as AppRole))
-    throw new ApiError(
-      403,
-      "Você não tem permissão para esta ação.",
-      "FORBIDDEN",
-    );
+  assertProfileAccess(profile as typeof profile & { role: AppRole }, roles, options);
 
   return {
     supabase,
@@ -48,6 +35,10 @@ export async function requireUser(request: Request, roles?: AppRole[]) {
     profile: profile as typeof profile & { role: AppRole },
     token,
   };
+}
+
+export function requireAdmin(request: Request) {
+  return requireUser(request, ["admin"]);
 }
 
 export async function consumeRateLimit(
@@ -85,11 +76,11 @@ export function jsonError(error: unknown) {
     return Response.json(
       {
         error: "INVALID_INPUT",
-        message: error.issues[0]?.message || "Revise os dados informados.",
+        message: "Revise os dados informados e tente novamente.",
       },
       { status: 400 },
     );
-  console.error("Moto SyXp API error", error);
+  console.error("MotoPombal API error", error);
   return Response.json(
     {
       error: "INTERNAL_ERROR",
@@ -107,7 +98,7 @@ export async function audit(
   entityId?: string,
   metadata: Record<string, unknown> = {},
 ) {
-  await supabase
+  const { error } = await supabase
     .from("audit_logs")
     .insert({
       actor_id: actorId,
@@ -116,4 +107,5 @@ export async function audit(
       entity_id: entityId,
       metadata,
     });
+  if (error) throw error;
 }

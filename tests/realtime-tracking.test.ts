@@ -9,6 +9,7 @@ import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 
 import { ApiError } from "../lib/backend/errors";
 import { calculateRoute } from "../lib/backend/routing";
+import { driverLocationRpcArgs } from "../lib/backend/driver-location-rpc";
 import { mapViewportKey, shouldAutoFitViewport } from "../lib/map/viewport";
 import {
   etaTarget,
@@ -24,6 +25,15 @@ import {
 
 let database: PGlite;
 
+test("localização do motorista envia todos os parâmetros exigidos pela função do banco", () => {
+  const payload = driverLocationRpcArgs({ driverId: randomUUID(), latitude: -10, longitude: -38, recordedAt: "2026-10-01T12:00:00.000Z" });
+  const serialized = JSON.parse(JSON.stringify(payload));
+  assert.equal(serialized.p_accuracy_meters, null);
+  assert.equal(serialized.p_heading, null);
+  assert.equal(serialized.p_speed_mps, null);
+  assert.equal(Object.keys(serialized).length, 8);
+});
+
 async function seedPassenger() {
   const id = randomUUID();
   await database.query("insert into auth.users(id) values ($1)", [id]);
@@ -38,12 +48,12 @@ async function seedDriver(online = false) {
     [id, { role: "driver" }],
   );
   await database.query(
-    "update public.drivers set approval_status = 'approved', online = $2, available = $2 where profile_id = $1",
-    [id, online],
-  );
-  await database.query(
     "insert into public.vehicles(id, driver_id, brand, model, color, plate) values ($1, $2, 'Honda', 'CG', 'Preta', $3)",
     [vehicleId, id, `R${id.slice(0, 6)}`],
+  );
+  await database.query(
+    "update public.drivers set approval_status = 'approved', online = $2, available = $2 where profile_id = $1",
+    [id, online],
   );
   return { id, vehicleId };
 }

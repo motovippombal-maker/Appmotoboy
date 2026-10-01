@@ -1,5 +1,4 @@
 import { audit, consumeRateLimit, jsonError, requireUser, ApiError } from "@/lib/backend/api";
-import { assertFreshDriverLocation } from "@/lib/backend/dispatch";
 
 const acceptedStatuses = ["aceita", "motorista_a_caminho", "motorista_chegou", "em_corrida"];
 
@@ -21,7 +20,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
       throw new ApiError(409, "Esta oferta expirou ou não foi destinada a você.", "OFFER_UNAVAILABLE");
     }
-    await assertFreshDriverLocation(supabase, user.id);
     const { data, error } = await supabase.rpc("accept_ride", { p_ride_id: id, p_driver_id: user.id });
     if (error) throw error;
     if (!data) {

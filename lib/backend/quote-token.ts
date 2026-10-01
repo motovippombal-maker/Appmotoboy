@@ -13,6 +13,7 @@ export type RideQuoteClaims = {
   originalFareCents: number;
   discountCents: number;
   couponCode: string | null;
+  couponRevision?: string | null;
   ruleFingerprint: string;
   issuedAt: number;
   expiresAt: number;
@@ -34,6 +35,7 @@ export function fareRuleFingerprint(input: {
   originalFareCents: number;
   discountCents: number;
   couponCode: string | null;
+  couponRevision?: string | null;
 }) {
   const snapshot = input.resolvedFare.snapshot;
   return createHash("sha256")
@@ -52,6 +54,7 @@ export function fareRuleFingerprint(input: {
         originalFareCents: input.originalFareCents,
         discountCents: input.discountCents,
         couponCode: input.couponCode,
+        couponRevision: input.couponRevision ?? null,
       }),
     )
     .digest("base64url");
@@ -66,6 +69,7 @@ export function buildQuoteClaims(input: {
   originalFareCents: number;
   discountCents: number;
   couponCode: string | null;
+  couponRevision?: string | null;
   now?: number;
 }): RideQuoteClaims {
   const issuedAt = input.now ?? Math.floor(Date.now() / 1000);
@@ -78,6 +82,7 @@ export function buildQuoteClaims(input: {
     originalFareCents: input.originalFareCents,
     discountCents: input.discountCents,
     couponCode: input.couponCode,
+    couponRevision: input.couponRevision ?? null,
     ruleFingerprint: fareRuleFingerprint(input),
     issuedAt,
     expiresAt: issuedAt + QUOTE_TTL_SECONDS,
@@ -112,6 +117,7 @@ function isClaims(value: unknown): value is RideQuoteClaims {
     typeof claims.originalFareCents === "number" &&
     typeof claims.discountCents === "number" &&
     (claims.couponCode === null || typeof claims.couponCode === "string") &&
+    (claims.couponRevision === undefined || claims.couponRevision === null || typeof claims.couponRevision === "string") &&
     typeof claims.ruleFingerprint === "string" &&
     typeof claims.issuedAt === "number" &&
     typeof claims.expiresAt === "number"
@@ -155,6 +161,7 @@ export function quoteMatches(
     quoted.originalFareCents === current.originalFareCents &&
     quoted.discountCents === current.discountCents &&
     quoted.couponCode === current.couponCode &&
+    (quoted.couponRevision ?? null) === (current.couponRevision ?? null) &&
     quoted.ruleFingerprint === current.ruleFingerprint
   );
 }

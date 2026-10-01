@@ -9,7 +9,7 @@ export async function GET(request: Request) {
     const now = new Date().toISOString();
     const [{ data: requests, error }, { data: location }] = await Promise.all([
       supabase.from("ride_requests").select("id,ride_id,expires_at,rides(*)").eq("driver_id", user.id).eq("status", "pending").gt("expires_at", now).order("created_at", { ascending: false }),
-      supabase.from("driver_locations").select("latitude,longitude").eq("driver_id", user.id).maybeSingle(),
+      supabase.from("driver_locations").select("latitude,longitude,updated_at").eq("driver_id", user.id).maybeSingle(),
     ]);
     if (error) throw error;
     const passengerIds = [...new Set((requests || []).map((requestRow) => {
@@ -22,13 +22,15 @@ export async function GET(request: Request) {
     const names = new Map((passengers || []).map((profile) => [profile.id, profile.full_name]));
     const offers = (requests || []).map((requestRow) => {
       const ride = Array.isArray(requestRow.rides) ? requestRow.rides[0] : requestRow.rides;
-      const pickupDistance = location && ride ? distanceKm({ lat: location.latitude, lng: location.longitude }, { lat: ride.origin_lat, lng: ride.origin_lng }) : null;
+      const gpsFresh = location && Date.now() - Date.parse(location.updated_at) <= 90_000;
+      const pickupDistance = gpsFresh && ride ? distanceKm({ lat: location.latitude, lng: location.longitude }, { lat: ride.origin_lat, lng: ride.origin_lng }) : null;
       return {
         id: requestRow.id,
         ride_id: requestRow.ride_id,
         expires_at: requestRow.expires_at,
         passenger_name: names.get(ride?.passenger_id) || "Passageiro",
         distance_to_pickup_meters: pickupDistance === null ? null : Math.round(pickupDistance * 1000),
+        estimated_time_to_pickup_seconds: pickupDistance === null ? null : Math.max(60, Math.round((pickupDistance * 1000) / 7)),
         ride,
       };
     });

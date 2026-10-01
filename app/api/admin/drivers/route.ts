@@ -1,8 +1,8 @@
-import { jsonError, requireUser } from "@/lib/backend/api";
+import { jsonError, requireAdmin } from "@/lib/backend/api";
 
 export async function GET(request: Request) {
   try {
-    const { supabase } = await requireUser(request, ["admin"]);
+    const { supabase } = await requireAdmin(request);
     const { data, error } = await supabase
       .from("drivers")
       .select("profile_id, approval_status, online, available, rating, trips_count, created_at, profiles(full_name, phone, avatar_url, blocked), vehicles(id, brand, model, color, plate, active)")

@@ -2,6 +2,7 @@ import "server-only";
 
 import webpush from "web-push";
 import { ApiError } from "@/lib/backend/api";
+import { pushConfiguration } from "@/lib/config/push";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
 
 type PushPayload = {
@@ -10,39 +11,25 @@ type PushPayload = {
   data: { notificationId: string; url: string; type: string; [key: string]: unknown };
 };
 
-export function pushConfiguration() {
-  const values = {
-    publicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim(),
-    privateKey: process.env.VAPID_PRIVATE_KEY?.trim(),
-    subject: process.env.VAPID_SUBJECT?.trim(),
-  };
-  const missing = [
-    !values.publicKey && "NEXT_PUBLIC_VAPID_PUBLIC_KEY",
-    !values.privateKey && "VAPID_PRIVATE_KEY",
-    !values.subject && "VAPID_SUBJECT",
-  ].filter(Boolean) as string[];
-  return { configured: missing.length === 0, missing, values };
-}
-
 function configureWebPush() {
   const config = pushConfiguration();
   if (!config.configured) throw new ApiError(503, `Push aguardando configuração: ${config.missing.join(", ")}.`, "PUSH_NOT_CONFIGURED");
   const { publicKey, privateKey, subject } = config.values;
-  if (!subject!.startsWith("mailto:") && !subject!.startsWith("https://")) throw new ApiError(503, "VAPID_SUBJECT deve usar mailto: ou https://.", "INVALID_VAPID_SUBJECT");
   webpush.setVapidDetails(subject!, publicKey!, privateKey!);
 }
 
-export async function dispatchPushQueue(limit = 50) {
+export async function dispatchPushQueue(limit = 50, targetNotificationIds?: string[]) {
   configureWebPush();
   const supabase = createSupabaseAdminClient();
   const now = new Date();
-  const { data: deliveries, error } = await supabase
+  let deliveryQuery = supabase
     .from("notification_push_deliveries")
     .select("id,notification_id,subscription_id,attempts")
     .in("status", ["pending", "processing", "retry"])
     .lte("next_attempt_at", now.toISOString())
-    .order("created_at")
-    .limit(Math.min(100, Math.max(1, limit)));
+    .order("created_at");
+  if (targetNotificationIds?.length) deliveryQuery = deliveryQuery.in("notification_id", targetNotificationIds);
+  const { data: deliveries, error } = await deliveryQuery.limit(Math.min(100, Math.max(1, limit)));
   if (error) throw error;
   if (!deliveries?.length) return { processed: 0, sent: 0, failed: 0, expired: 0 };
 
@@ -80,12 +67,21 @@ export async function dispatchPushQueue(limit = 50) {
       continue;
     }
     const payload: PushPayload = {
-      title: notification.title,
-      body: notification.body,
-      data: { notificationId: notification.id, type: notification.type, url: "/", ...(notification.data || {}) },
+      title: notification.type === "ride.offer" ? "MotoPombal" : notification.title,
+      body: notification.type === "ride.offer" ? "Nova corrida disponível" : notification.body,
+      data: {
+        notificationId: notification.id,
+        type: notification.type,
+        url: notification.type === "ride.offer"
+          ? `/?open=driver-offer&ride=${encodeURIComponent(String(notification.data?.rideId || ""))}`
+          : notification.type.startsWith("queue.")
+            ? "/?open=driver-queue"
+          : "/?open=notifications",
+        ...(notification.data || {}),
+      },
     };
     try {
-      await webpush.sendNotification({ endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } }, JSON.stringify(payload), { TTL: 300, urgency: "high" });
+      await webpush.sendNotification({ endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } }, JSON.stringify(payload), { TTL: notification.type === "ride.offer" ? 90 : 300, urgency: "high" });
       await supabase.from("notification_push_deliveries").update({ status: "sent", attempts: delivery.attempts + 1, sent_at: new Date().toISOString(), last_error: null }).eq("id", delivery.id).eq("status", "processing");
       result.sent += 1;
     } catch (caught) {

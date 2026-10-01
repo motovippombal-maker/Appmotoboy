@@ -1,0 +1,125 @@
+/* Acompanhamento do passageiro: rotas, identificação e ações. */
+.app-role-passenger .passenger-stage-accepted .status-heading,
+.app-role-passenger .passenger-stage-arrived .status-heading,
+.app-role-passenger .passenger-stage-riding .status-heading { display: none; }
+.app-role-passenger .passenger-stage-accepted .tracking-moto-marker,
+.app-role-passenger .passenger-stage-arrived .tracking-moto-marker,
+.app-role-passenger .passenger-stage-riding .tracking-moto-marker { z-index: 800; }
+.app-role-passenger .tracking-moto-marker > span { width: 52px; height: 52px; border: 3px solid #fff; border-radius: 50%; display: grid; place-items: center; background: #07336f; box-shadow: 0 0 0 7px rgba(0,104,255,.16), 0 4px 12px rgba(6,31,74,.28); transform: none; }
+.app-role-passenger .tracking-moto-marker > span img { display: block; width: 43px; height: 31px; object-fit: contain; }
+.app-role-passenger .tracking-moto-marker > b { position: absolute; top: -56px; left: -66px; width: 188px; padding: 8px 11px; border-radius: 12px; display: grid; gap: 3px; background: #071b42; color: #fff; text-align: center; white-space: normal; box-shadow: 0 4px 12px rgba(4,28,67,.25); }
+.app-role-passenger .tracking-moto-marker > b::after { content: ""; position: absolute; left: calc(50% - 6px); bottom: -6px; width: 12px; height: 12px; transform: rotate(45deg); background: #071b42; }
+.app-role-passenger .tracking-moto-marker > b strong { font-size: 12px; line-height: 1.15; }
+.app-role-passenger .tracking-moto-marker > b small { color: #d5e9ff; font-size: 11px; }
+.app-role-passenger .passenger-stage-arrived .tracking-moto-marker > span { background: #b31b30; box-shadow: 0 0 0 8px rgba(231,25,50,.17), 0 4px 12px rgba(70,8,23,.23); }
+.app-role-passenger .passenger-stage-arrived .tracking-moto-marker > b,
+.app-role-passenger .passenger-stage-arrived .tracking-moto-marker > b::after { background: #e71932; }
+.tracking-landmark > span { width: 24px; height: 28px; display: grid; place-items: center; color: #086af0; filter: drop-shadow(0 2px 3px rgba(8,35,75,.2)); }
+.tracking-landmark svg { width: 24px; height: 28px; }
+.tracking-landmark > b { position: absolute; top: 3px; left: 27px; max-width: 105px; padding: 3px 5px; border-radius: 5px; background: rgba(255,255,255,.94); color: #09234e; font-size: 9px; line-height: 1.1; white-space: normal; box-shadow: 0 1px 4px rgba(10,31,62,.12); }
+.tracking-landmark.category-hospital > span { color: #e71932; }
+.tracking-landmark.category-market > span,.tracking-landmark.category-square > span { color: #08984d; }
+.tracking-landmark.category-government > span { color: #173c73; }
+.passenger-tracking-header { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; margin-bottom: 13px; }
+.passenger-tracking-header h2 { margin: 0; color: #071b42; font-size: clamp(17px, 4.6vw, 23px); line-height: 1.12; }
+.passenger-tracking-header p { margin: 4px 0 0; color: #59708f; font-size: 12px; }
+.passenger-tracking-eta { min-height: 55px; min-width: 103px; padding: 7px; border-radius: 13px; display: flex; align-items: center; gap: 6px; background: #edf5ff; color: #071b42; }
+.passenger-tracking-eta > svg { width: 25px; height: 25px; flex: none; }
+.passenger-tracking-eta span { display: grid; gap: 2px; }
+.passenger-tracking-eta b { font-size: 19px; line-height: 1; white-space: nowrap; }
+.passenger-tracking-eta small { color: #526582; font-size: 9px; line-height: 1.1; }
+.app-role-passenger .passenger-driver-card { display: grid; grid-template-columns: 64px minmax(0,1fr) 64px; gap: 9px; align-items: center; padding: 12px; border: 1px solid #dbe6f3; border-radius: 18px; background: #fff; box-shadow: 0 3px 12px rgba(12,40,78,.06); }
+.app-role-passenger .passenger-stage-arrived .passenger-driver-card { border-color: #70b0ff; box-shadow: 0 0 0 3px #e6f3ff; }
+.app-role-passenger .passenger-driver-card .driver-avatar { width: 62px; height: 62px; overflow: visible; border: 3px solid #0870f7; border-radius: 50%; background: #dceaff; color: #0751ac; font-size: 18px; }
+.app-role-passenger .passenger-driver-card .driver-avatar img { border-radius: 50%; object-fit: cover; }
+.app-role-passenger .passenger-driver-card .verified { right: -4px; bottom: -3px; width: 17px; height: 17px; background: #00a54d; }
+.app-role-passenger .passenger-driver-card .driver-copy { min-width: 0; display: grid; gap: 3px; }
+.app-role-passenger .passenger-driver-card .driver-copy > b { color: #071b42; font-size: 16px; line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-role-passenger .passenger-driver-card .driver-copy > span { margin: 0; color: #21385f !important; font-size: 11px !important; }
+.app-role-passenger .passenger-driver-card .driver-copy > span svg { color: #ffae00; }
+.app-role-passenger .passenger-driver-card .driver-copy > small { color: #4c6080; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.passenger-vehicle-plate { width: max-content; max-width: 100%; padding: 2px 6px; border: 1px solid #092448; border-radius: 4px; display: grid; justify-items: center; color: #071b42; background: #fff; font-size: 13px; letter-spacing: .04em; line-height: 1.1; }
+.passenger-vehicle-plate small { width: 100%; padding: 1px 5px; background: #075ce4; color: #fff; font-size: 6px; line-height: 1; text-align: center; }
+.passenger-vehicle-fallback { width: 62px; display: grid; justify-items: center; gap: 2px; }
+.passenger-vehicle-fallback img { width: 60px; height: 41px; padding: 3px; border-radius: 10px; background: #e9f2ff; }
+.passenger-vehicle-fallback small { color: #7688a0; font-size: 8px; text-align: center; }
+.app-role-passenger .passenger-driver-actions { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 6px; margin-top: 6px; }
+.app-role-passenger .passenger-driver-actions > :is(button,a) { width: 100%; min-width: 0; height: 47px; padding: 4px; border: 0; border-radius: 11px; display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 5px; background: #edf5ff; color: #075dda; text-decoration: none; }
+.app-role-passenger .passenger-driver-actions > :is(button,a):first-child { background: #086af0; color: #fff; }
+.app-role-passenger .passenger-driver-actions > :is(button,a):last-child { background: #fff0f1; color: #d9152f; }
+.app-role-passenger .passenger-driver-actions svg { width: 18px; height: 18px; flex: none; }
+.app-role-passenger .passenger-driver-actions small { color: inherit; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.app-role-passenger .passenger-driver-actions > button:disabled { opacity: .48; cursor: not-allowed; }
+.passenger-tracking-timeline { margin: 17px 0 2px; display: grid; grid-template-columns: minmax(0,1fr) 22px minmax(0,1.3fr) 22px minmax(0,1fr); align-items: start; color: #6c7d95; }
+.passenger-tracking-timeline > div:not(.line) { min-width: 0; display: grid; justify-items: center; gap: 4px; text-align: center; }
+.passenger-tracking-timeline > div:not(.line) > span { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: #d5dfeb; color: #fff; font-size: 14px; font-weight: 800; }
+.passenger-tracking-timeline > div.active > span,.passenger-tracking-timeline > div.done > span { background: #096ef3; }
+.passenger-tracking-timeline > div.active > span { box-shadow: 0 0 0 4px #e8f2ff; }
+.passenger-tracking-timeline svg { width: 16px; }
+.passenger-tracking-timeline .line { height: 2px; margin-top: 14px; background: #d5dfeb; }
+.passenger-tracking-timeline .line.done { background: #096ef3; }
+.passenger-tracking-timeline b { font-size: 11px; line-height: 1.15; }
+.passenger-tracking-timeline .active b { color: #0865e5; }
+.passenger-tracking-timeline small { min-height: 13px; font-size: 10px; }
+.passenger-tracking-feedback { margin: 12px 0 0; color: #5d6d84; font-size: 11px; }
+.passenger-arrival-note { min-height: 64px; margin: 15px 0 4px; padding: 11px 13px; border-radius: 14px; display: flex; align-items: center; gap: 10px; background: #fff5dd; color: #a96e00; }
+.passenger-arrival-note > svg { width: 27px; height: 27px; flex: none; }
+.passenger-arrival-note span { display: grid; gap: 3px; }
+.passenger-arrival-note b { font-size: 13px; }
+.passenger-arrival-note small { font-size: 11px; }
+.passenger-tracking-overlay { position: fixed; z-index: 2000; inset: 0; padding: 18px; display: grid; place-items: center; background: rgba(3,15,38,.52); }
+.passenger-tracking-overlay > section { position: relative; width: min(100%,420px); padding: 23px; border-radius: 20px; display: grid; gap: 12px; background: #fff; color: #071b42; box-shadow: 0 15px 50px rgba(0,0,0,.25); }
+.passenger-tracking-overlay > section > svg { width: 28px; color: #086af0; }
+.passenger-tracking-overlay h2 { margin: 0; padding-right: 22px; font-size: 20px; line-height: 1.2; }
+.passenger-tracking-overlay p { margin: 0; color: #536987; font-size: 13px; line-height: 1.4; }
+.passenger-tracking-overlay textarea { width: 100%; min-height: 94px; padding: 12px; border: 1px solid #c9d9ee; border-radius: 11px; color: #071b42; resize: vertical; }
+.passenger-tracking-overlay .tracking-modal-close { position: absolute; top: 12px; right: 12px; width: 36px; height: 36px; border: 0; border-radius: 9px; background: #ecf3fc; color: #113761; }
+.tracking-modal-close svg { width: 18px; }
+.tracking-modal-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
+.tracking-modal-actions > :is(button,a) { min-height: 46px; padding: 8px; border: 1px solid #c8d8eb; border-radius: 10px; display: grid; place-items: center; background: #fff; color: #1b385f; text-decoration: none; text-align: center; font-size: 13px; font-weight: 800; }
+.tracking-modal-actions > :is(button,a):last-child { border-color: #086af0; background: #086af0; color: #fff; }
+.tracking-modal-actions > .danger:last-child { border-color: #d91f36; background: #d91f36; }
+.tracking-modal-actions a[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+
+@media (max-width: 950px) {
+  .app-role-passenger .passenger-stage-accepted .ride-sheet,
+  .app-role-passenger .passenger-stage-arrived .ride-sheet,
+  .app-role-passenger .passenger-stage-riding .ride-sheet { position: fixed; z-index: 900; left: 0; right: 0; bottom: 0 !important; width: 100%; height: min(440px, 48svh) !important; padding: 9px 14px max(15px,env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; overflow-x: hidden; overflow-y: auto; background: #fff; box-shadow: 0 -6px 20px rgba(6,24,51,.14); }
+  .app-role-passenger .passenger-stage-accepted .ride-sheet.sheet-collapsed,
+  .app-role-passenger .passenger-stage-arrived .ride-sheet.sheet-collapsed,
+  .app-role-passenger .passenger-stage-riding .ride-sheet.sheet-collapsed { height: min(150px,28svh) !important; }
+  .app-role-passenger .passenger-stage-accepted .ride-sheet.sheet-expanded,
+  .app-role-passenger .passenger-stage-arrived .ride-sheet.sheet-expanded,
+  .app-role-passenger .passenger-stage-riding .ride-sheet.sheet-expanded { height: calc(100svh - 82px - env(safe-area-inset-top)) !important; }
+  .app-role-passenger .passenger-stage-accepted .status-heading,
+  .app-role-passenger .passenger-stage-arrived .status-heading,
+  .app-role-passenger .passenger-stage-riding .status-heading { display: none; }
+  .app-role-passenger .passenger-stage-accepted .map-canvas,
+  .app-role-passenger .passenger-stage-arrived .map-canvas,
+  .app-role-passenger .passenger-stage-riding .map-canvas { --map-safe-bottom: min(460px,50svh); }
+  .app-role-passenger .passenger-stage-accepted .map-tools,
+  .app-role-passenger .passenger-stage-arrived .map-tools,
+  .app-role-passenger .passenger-stage-riding .map-tools { top: 16px; right: 13px; bottom: auto !important; gap: 9px; }
+  .app-role-passenger .passenger-stage-accepted .leaflet-top.leaflet-right,
+  .app-role-passenger .passenger-stage-arrived .leaflet-top.leaflet-right,
+  .app-role-passenger .passenger-stage-riding .leaflet-top.leaflet-right { top: 62px; right: 13px; }
+  .app-role-passenger .passenger-stage-accepted .leaflet-bottom.leaflet-right,
+  .app-role-passenger .passenger-stage-arrived .leaflet-bottom.leaflet-right,
+  .app-role-passenger .passenger-stage-riding .leaflet-bottom.leaflet-right { bottom: calc(48svh + 12px); }
+  .app-role-passenger .passenger-stage-accepted .map-tools button,
+  .app-role-passenger .passenger-stage-arrived .map-tools button,
+  .app-role-passenger .passenger-stage-riding .map-tools button { width: 43px; height: 43px; }
+  .app-role-passenger .map-follow-driver[aria-pressed="true"] { background: #086af0 !important; color: #fff !important; }
+  .app-role-passenger .passenger-stage-accepted .route-marker.origin > b,
+  .app-role-passenger .passenger-stage-arrived .route-marker.origin > b { top: -34px; left: -25px; padding: 5px 7px; border-radius: 8px; background: #086af0; color: #fff; font-size: 10px; }
+}
+@media (max-width: 370px) {
+  .passenger-tracking-header h2 { font-size: 16px; }
+  .passenger-tracking-eta { min-width: 92px; }
+  .passenger-tracking-eta b { font-size: 16px; }
+  .app-role-passenger .passenger-driver-card { grid-template-columns: 55px minmax(0,1fr) 48px; padding: 9px; gap: 7px; }
+  .app-role-passenger .passenger-driver-card .driver-avatar { width: 54px; height: 54px; }
+  .passenger-vehicle-fallback,.passenger-vehicle-fallback img { width: 47px; }
+  .app-role-passenger .passenger-driver-actions small { font-size: 10px; }
+  .app-role-passenger .passenger-driver-actions svg { width: 15px; }
+}

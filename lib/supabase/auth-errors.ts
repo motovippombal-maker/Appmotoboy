@@ -9,7 +9,7 @@ export function friendlyAuthError(error: AuthLikeError) {
     message.includes("already registered") ||
     message.includes("already been registered")
   ) {
-    return "Este e-mail já está cadastrado. Entre na sua conta ou recupere a senha.";
+    return "Este celular já está cadastrado. Entre na sua conta ou recupere a senha.";
   }
   if (
     code === "invalid_credentials" ||
@@ -21,10 +21,8 @@ export function friendlyAuthError(error: AuthLikeError) {
     code === "email_address_invalid" ||
     (message.includes("email address") && message.includes("invalid"))
   )
-    return "Informe um endereço de e-mail válido.";
-  if (message.includes("email not confirmed")) {
-    return "Confirme o e-mail enviado pela Moto SyXp antes de entrar.";
-  }
+    return "Não foi possível validar a identificação deste usuário.";
+  if (message.includes("email not confirmed")) return "Não foi possível liberar este acesso. Fale com o suporte MotoPombal.";
   if (
     message.includes("password") &&
     (message.includes("weak") || message.includes("least"))

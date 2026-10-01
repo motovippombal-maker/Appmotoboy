@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient } from "@supabase/supabase-js";
+import { parseSupabaseUrl } from "@/lib/config/public-site-url.mjs";
 
 export function createSupabaseAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -10,7 +11,7 @@ export function createSupabaseAdminClient() {
     throw new Error("As variáveis privadas do Supabase não foram configuradas.");
   }
 
-  return createClient(url, secretKey, {
+  return createClient(parseSupabaseUrl(url), secretKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,

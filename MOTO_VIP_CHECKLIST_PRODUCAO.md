@@ -1,8 +1,27 @@
-# MOTO VIP — CHECKLIST PARA ABERTURA AO PÚBLICO
+# MOTOPOMBAL — CHECKLIST PARA ABERTURA AO PÚBLICO
 
-Data da revisão: 28/09/2026
+Data da revisão: 29/09/2026
 
 Este documento separa implementação técnica, teste e homologação real. O aplicativo **não deve ser liberado comercialmente** enquanto houver item crítico bloqueado ou pendente de homologação.
+
+## Portão de publicação — Etapa 9
+
+Os checks técnicos locais não equivalem a uma liberação. `[x]` indica somente validação no repositório/ambiente isolado; `[ ]` exige configuração ou homologação externa:
+
+- [ ] Definir e cadastrar a origem HTTPS final em `NEXT_PUBLIC_SITE_URL` e nos redirects do Supabase Auth.
+- [ ] Conferir o histórico do banco, realizar backup recuperável e aplicar, com autorização separada, a migration financeira da Etapa 7 **antes** da migration de segurança da Etapa 8; validar sem reaplicação cega.
+- [ ] Verificar compatibilidade e concorrência em PostgreSQL real multi-conexão; os testes isolados atuais usam principalmente PGlite.
+- [ ] Confirmar a configuração de `SUPABASE_SECRET_KEY` somente no servidor; ela também deriva a assinatura HMAC das cotações. Planejar a rotação sem invalidar cotações pendentes inadvertidamente.
+- [ ] Comprovar a rotação/revogação da chave administrativa antiga e revisar os Advisors de segurança e desempenho do Supabase.
+- [ ] Configurar VAPID e despachante autenticado de Push, ou manter Push indisponível; testar expiração, logout e troca de usuário em aparelhos reais.
+- [ ] Homologar Pix com provedor real, ou mantê-lo explicitamente indisponível, sem aprovação fictícia.
+- [x] Aprovar lint, TypeScript, ambos os builds, regressões 2–8 e 25 testes da Etapa 9 no artefato local.
+- [x] Executar as 13 migrations desde zero, em ordem, em banco PGlite isolado; isto não comprova a aplicação no Supabase real.
+- [ ] Validar manifest, ícones, instalação, atualização e offline em Android e iOS reais por HTTPS.
+- [ ] Concluir fluxo autenticado passageiro/motorista, GPS, Push e rede instável em dois celulares reais. Não presumir tracking contínuo em segundo plano.
+- [ ] Registrar o deployment anterior, testar restauração do backup e aprovar o plano de rollback do frontend e de recuperação do banco.
+
+O caminho principal escolhido é **Next.js/Vercel** (`npm run build:vercel`); Vinext/Cloudflare (`npm run build`) permanece secundário. Consulte [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md) para escopos das variáveis e plano de recuperação. Não fazer deploy, mudar DNS ou aplicar migrations reais como parte desta Etapa 9.
 
 ## Situação por recurso
 

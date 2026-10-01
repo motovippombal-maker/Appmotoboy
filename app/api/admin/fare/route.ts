@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { audit, jsonError, requireUser } from "@/lib/backend/api";
+import { audit, jsonError, requireAdmin } from "@/lib/backend/api";
 import { parseFareConfig, serializeFareConfig } from "@/lib/backend/fare";
 
 const schema = z.object({
@@ -14,7 +14,7 @@ const schema = z.object({
 
 export async function GET(request: Request) {
   try {
-    const { supabase } = await requireUser(request, ["admin"]);
+    const { supabase } = await requireAdmin(request);
     const { data, error } = await supabase.from("system_settings").select("value,updated_at").eq("key", "fare").single();
     if (error) throw error;
     return Response.json({ fare: parseFareConfig(data.value), updatedAt: data.updated_at });
@@ -23,7 +23,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { supabase, user } = await requireUser(request, ["admin"]);
+    const { supabase, user } = await requireAdmin(request);
     const fare = schema.parse(await request.json());
     const { data: current, error: currentError } = await supabase.from("system_settings").select("value").eq("key", "fare").single();
     if (currentError) throw currentError;

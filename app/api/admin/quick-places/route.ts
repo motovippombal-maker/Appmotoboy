@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ApiError, audit, consumeRateLimit, jsonError, requireUser } from "@/lib/backend/api";
+import { ApiError, audit, consumeRateLimit, jsonError, requireAdmin } from "@/lib/backend/api";
 
 const categories = [
   "hospital", "education", "bus_station", "government", "market", "pharmacy",
@@ -23,12 +23,21 @@ const placeSchema = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   active: z.boolean(),
   featured: z.boolean(),
+  locationVerified: z.boolean(),
   sortOrder: z.number().int().min(0).max(100000),
+}).superRefine((input, context) => {
+  if (input.active && !input.locationVerified) {
+    context.addIssue({
+      code: "custom",
+      path: ["locationVerified"],
+      message: "Defina e confirme a localização exata no mapa antes de ativar o ponto.",
+    });
+  }
 });
 
 export async function GET(request: Request) {
   try {
-    const { supabase } = await requireUser(request, ["admin"]);
+    const { supabase } = await requireAdmin(request);
     const { data, error } = await supabase
       .from("quick_places")
       .select("id,name,address,latitude,longitude,category,icon,color,active,featured,sort_order,created_at,updated_at")
@@ -43,7 +52,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { supabase, user } = await requireUser(request, ["admin"]);
+    const { supabase, user } = await requireAdmin(request);
     await consumeRateLimit(supabase, `admin-quick-places:${user.id}`, 60, 60);
     const input = placeSchema.parse(await request.json());
     const values = {
@@ -72,7 +81,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const { supabase, user } = await requireUser(request, ["admin"]);
+    const { supabase, user } = await requireAdmin(request);
     await consumeRateLimit(supabase, `admin-quick-places-order:${user.id}`, 30, 60);
     const { orderedIds } = z.object({ orderedIds: z.array(z.string().uuid()).min(1).max(500) }).parse(await request.json());
     const uniqueIds = [...new Set(orderedIds)];
@@ -91,7 +100,7 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const { supabase, user } = await requireUser(request, ["admin"]);
+    const { supabase, user } = await requireAdmin(request);
     await consumeRateLimit(supabase, `admin-quick-places-delete:${user.id}`, 20, 60);
     const id = z.string().uuid().parse(new URL(request.url).searchParams.get("id"));
     const { data: existing, error: findError } = await supabase.from("quick_places").select("id,name").eq("id", id).single();

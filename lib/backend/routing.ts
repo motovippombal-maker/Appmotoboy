@@ -3,9 +3,26 @@ import { isValidCoordinates } from "@/lib/location/coordinates";
 
 export type Coordinate = { lat: number; lng: number };
 
-type OsrmRoute = { distance: number; duration: number; geometry: string };
+export type RouteStep = {
+  distanceMeters: number;
+  location: [number, number];
+  type: string;
+  modifier?: string;
+  road: string;
+};
 
-export async function calculateRoute(origin: Coordinate, destination: Coordinate) {
+type OsrmRoute = {
+  distance: number;
+  duration: number;
+  geometry: { type: string; coordinates: number[][] };
+  legs?: Array<{ steps?: Array<{
+    distance: number;
+    name?: string;
+    maneuver: { location: [number, number]; type: string; modifier?: string };
+  }> }>;
+};
+
+export async function calculateRoute(origin: Coordinate, destination: Coordinate, withSteps = false) {
   if (!isValidCoordinates(origin) || !isValidCoordinates(destination)) {
     throw new ApiError(
       400,
@@ -14,10 +31,10 @@ export async function calculateRoute(origin: Coordinate, destination: Coordinate
     );
   }
   const baseUrl = process.env.ROUTING_BASE_URL || "https://router.project-osrm.org";
-  const url = `${baseUrl}/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson`;
+  const url = `${baseUrl}/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson${withSteps ? "&steps=true" : ""}`;
   let response: Response;
   try {
-    response = await fetch(url, { headers: { "User-Agent": "MotoVIP/1.0" }, signal: AbortSignal.timeout(8000) });
+    response = await fetch(url, { headers: { "User-Agent": "MotoPombal/1.0" }, signal: AbortSignal.timeout(8000) });
   } catch {
     throw new ApiError(503, "Não foi possível calcular a rota agora.", "ROUTING_UNAVAILABLE");
   }
@@ -29,8 +46,21 @@ export async function calculateRoute(origin: Coordinate, destination: Coordinate
     throw new ApiError(503, "Não foi possível calcular a rota agora.", "ROUTING_UNAVAILABLE");
   }
   const route = payload.routes?.[0];
-  if (!route || route.distance <= 0 || route.duration <= 0) throw new ApiError(422, "Rota não encontrada.", "ROUTE_NOT_FOUND");
-  return { distanceMeters: Math.round(route.distance), durationSeconds: Math.round(route.duration), geometry: JSON.stringify(route.geometry) };
+  if (!route || route.distance <= 0 || route.duration <= 0 || route.geometry?.type !== "LineString" ||
+      !Array.isArray(route.geometry.coordinates) || route.geometry.coordinates.length < 2 ||
+      !route.geometry.coordinates.every((point) => point.length >= 2 && Number.isFinite(point[0]) && Number.isFinite(point[1])))
+    throw new ApiError(422, "Rota não encontrada.", "ROUTE_NOT_FOUND");
+  const steps: RouteStep[] = withSteps
+    ? (route.legs || []).flatMap((leg) => leg.steps || []).map((step) => ({
+        distanceMeters: Math.round(step.distance),
+        location: step.maneuver.location,
+        type: step.maneuver.type,
+        modifier: step.maneuver.modifier,
+        road: step.name || "",
+      }))
+    : [];
+  const result = { distanceMeters: Math.round(route.distance), durationSeconds: Math.round(route.duration), geometry: JSON.stringify(route.geometry) };
+  return withSteps ? { ...result, steps } : result;
 }
 
 export function distanceKm(a: Coordinate, b: Coordinate) {

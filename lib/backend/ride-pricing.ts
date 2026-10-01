@@ -58,6 +58,7 @@ export async function quoteRidePrice(input: {
     originalFareCents,
     discountCents,
     couponCode,
+    couponRevision: coupon?.revision ?? null,
   });
 
   return {

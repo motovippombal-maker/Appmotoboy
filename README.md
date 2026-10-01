@@ -1,4 +1,4 @@
-# Moto VIP
+# MotoPombal
 
 Plataforma de mototáxi digital para Ribeira do Pombal/BA. O projeto reúne os fluxos de passageiro, motorista e administração com Supabase, localização, mapa, corridas em tempo real e tarifas administráveis por região.
 
@@ -63,15 +63,17 @@ O ambiente de desenvolvimento abre normalmente em `http://localhost:5173`.
 
 ```bash
 npm run lint
+npx tsc --noEmit
 npm run build
 npm run build:vercel
+npm run test:production
 ```
 
-O build padrão mantém a saída Vinext/Cloudflare. Para publicar o Next.js nativo na Vercel, siga [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md).
+O caminho principal de publicação é Next.js nativo na Vercel: `npm run build:vercel` valida esse build e `vercel.json` o seleciona na plataforma. `npm run build` mantém Vinext/Cloudflare como caminho secundário de desenvolvimento e validação; não há deploy Cloudflare homologado nesta etapa. Execute `test:production` após os builds, pois ele verifica os bundles gerados. Para configuração e futura publicação deliberada, siga [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md). Nenhum comando de deploy faz parte desta etapa.
 
 ## Banco de dados
 
-As migrations incrementais estão em `supabase/migrations`. Aplique-as em ordem crescente no projeto Supabase. Elas não devem ser reaplicadas em um banco que já tenha recebido o mesmo conteúdo manualmente.
+As migrations incrementais estão em `supabase/migrations`. Antes de uma aplicação autorizada, confira o histórico real do projeto Supabase e preserve a ordem crescente: a migration financeira da Etapa 7 (`20260929100000`) antecede a migration de segurança da Etapa 8 (`20260929110000`). Nenhuma das duas foi aplicada ao banco real nesta etapa. Nunca reaplique cegamente conteúdo que o banco já recebeu.
 
 Principais etapas:
 

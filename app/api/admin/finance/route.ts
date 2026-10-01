@@ -1,4 +1,4 @@
-import { ApiError, jsonError, requireUser } from "@/lib/backend/api";
+import { ApiError, jsonError, requireAdmin } from "@/lib/backend/api";
 
 function chunks<T>(items: T[], size: number) {
   return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
@@ -6,7 +6,7 @@ function chunks<T>(items: T[], size: number) {
 
 export async function GET(request: Request) {
   try {
-    const { supabase } = await requireUser(request, ["admin"]);
+    const { supabase } = await requireAdmin(request);
     const params = new URL(request.url).searchParams;
     const to = params.get("to") ? new Date(params.get("to")!) : new Date();
     const from = params.get("from") ? new Date(params.get("from")!) : new Date(to.getTime() - 30 * 86400000);
@@ -26,6 +26,8 @@ export async function GET(request: Request) {
     if (paymentError) throw paymentError;
     const payments = paymentResults.flatMap((result) => result.data || []);
     const completed = rides.filter((ride) => ride.status === "finalizada");
+    const completedIds = new Set(completed.map((ride) => ride.id));
+    const completedPayments = payments.filter((payment) => completedIds.has(payment.ride_id));
     const driverIds = [...new Set(completed.map((ride) => ride.driver_id).filter(Boolean))];
     const profileResults = await Promise.all(chunks(driverIds, 200).map((ids) => supabase.from("profiles").select("id,full_name").in("id", ids)));
     const profileError = profileResults.find((result) => result.error)?.error;
@@ -38,7 +40,8 @@ export async function GET(request: Request) {
       const amount = ride.final_fare_cents ?? ride.fare_cents;
       const payment = payments.find((item) => item.ride_id === ride.id);
       current.rides += 1; current.grossCents += amount;
-      if (payment?.status === "pago") current.paidCents += payment.amount_cents; else current.pendingCents += amount;
+      if (payment?.status === "pago") current.paidCents += payment.amount_cents;
+      if (payment?.status === "aguardando_pagamento") current.pendingCents += payment.amount_cents;
       byDriver.set(ride.driver_id, current);
     }
     return Response.json({
@@ -47,8 +50,10 @@ export async function GET(request: Request) {
         completedRides: completed.length,
         cancellations: rides.filter((ride) => ride.status === "cancelada").length,
         grossCents: completed.reduce((sum, ride) => sum + (ride.final_fare_cents ?? ride.fare_cents), 0),
-        pixPaidCents: payments.filter((payment) => payment.method === "pix" && payment.status === "pago").reduce((sum, payment) => sum + payment.amount_cents, 0),
-        pendingCents: payments.filter((payment) => payment.status === "aguardando_pagamento").reduce((sum, payment) => sum + payment.amount_cents, 0),
+        pixPaidCents: completedPayments.filter((payment) => payment.method === "pix" && payment.status === "pago").reduce((sum, payment) => sum + payment.amount_cents, 0),
+        cashPaidCents: completedPayments.filter((payment) => payment.method === "cash" && payment.status === "pago").reduce((sum, payment) => sum + payment.amount_cents, 0),
+        receivedCents: completedPayments.filter((payment) => payment.status === "pago").reduce((sum, payment) => sum + payment.amount_cents, 0),
+        pendingCents: completedPayments.filter((payment) => payment.status === "aguardando_pagamento").reduce((sum, payment) => sum + payment.amount_cents, 0),
       },
       commission: commissionSetting?.value || { configured: false, percentage_bps: 0, fixed_cents: 0 },
       byDriver: [...byDriver.values()].sort((a, b) => b.grossCents - a.grossCents),

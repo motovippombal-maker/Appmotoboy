@@ -20,7 +20,7 @@ export function regionLabels(address: NominatimAddress = {}) {
 export async function reverseDestination(lat: number, lng: number) {
   const query = new URLSearchParams({ format: "jsonv2", addressdetails: "1", lat: String(lat), lon: String(lng) });
   const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${query}`, {
-    headers: { "User-Agent": "MotoVIP/1.0", "Accept-Language": "pt-BR" },
+    headers: { "User-Agent": "MotoPombal/1.0", "Accept-Language": "pt-BR" },
     cache: "no-store",
     signal: AbortSignal.timeout(8000),
   });
