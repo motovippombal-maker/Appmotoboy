@@ -144,7 +144,7 @@ test("3a. rodízio oferece um por vez e ignora distância ou ausência de GPS", 
   const first = await seedDriver();
   const second = await seedDriver();
   const third = await seedDriver();
-  await database.query("delete from public.driver_locations where driver_id = $1", [first.id]);
+  await database.query("update public.driver_locations set updated_at = now() - interval '1 hour' where driver_id = $1", [first.id]);
   await database.query("update public.driver_locations set latitude = -10.8700 where driver_id = $1", [second.id]);
   await database.query("update public.driver_locations set latitude = -10.8380 where driver_id = $1", [third.id]);
 
@@ -511,4 +511,110 @@ test("11. migração de cancelamento tolera reaplicação após execução manua
     "20261001190000_driver_ride_cancellation_audit.sql"), "utf8");
   await database.exec(migration);
   assert.equal((await value("select count(*)::integer as count from pg_constraint where conrelid = 'public.rides'::regclass and conname = 'rides_cancellation_fee_nonnegative'")).count, 1);
+});
+
+test("12. motorista cancela sem GPS, libera sua corrida e redistribui a mesma solicitação", async () => {
+  await database.query("update public.drivers set online = false, available = false");
+  const passenger = await seedPassenger();
+  const first = await seedDriver();
+  const second = await seedDriver();
+  const rideId = await createRide(passenger);
+  await createOffer(rideId, first.id);
+  assert.equal(await acceptRide(rideId, first.id), true);
+  await database.query("update public.driver_locations set ride_id = $1 where driver_id = $2", [rideId, first.id]);
+  await database.query("update public.rides set status = 'motorista_a_caminho' where id = $1", [rideId]);
+  await database.query("delete from public.driver_locations where driver_id = $1", [first.id]);
+
+  const result = await value("select (public.driver_cancel_and_redispatch($1,$2,'unsafe','Local inseguro')).status as status", [rideId, first.id]);
+  assert.equal(result.status, "procurando_motorista");
+  assert.deepEqual(await value("select status,driver_id from public.rides where id = $1", [rideId]), { status: "procurando_motorista", driver_id: null });
+  assert.equal((await value("select available from public.drivers where profile_id = $1", [first.id])).available, true);
+  assert.equal((await value("select ride_id from public.driver_locations where driver_id = $1", [first.id]))?.ride_id ?? null, null);
+  assert.equal((await value("select driver_id from public.ride_requests where ride_id = $1 and status = 'pending'", [rideId])).driver_id, second.id);
+  assert.equal((await value("select count(*)::integer as count from public.ride_driver_cancellations where ride_id = $1", [rideId])).count, 1);
+  assert.equal(await acceptRide(rideId, second.id), true);
+  assert.equal((await value("select next_driver_id from public.ride_driver_cancellations where ride_id = $1", [rideId])).next_driver_id, second.id);
+  assert.equal((await value("select driver_id from public.rides where id = $1", [rideId])).driver_id, second.id);
+  assert.equal((await value("select count(*)::integer as count from public.rides where passenger_id = $1", [passenger])).count, 1);
+  assert.equal((await value("select count(*)::integer as count from public.notifications where user_id = $1 and type = 'ride.driver_cancelled'", [passenger])).count, 1);
+  const retry = await value("select (public.driver_cancel_and_redispatch($1,$2,'unsafe','Local inseguro')).driver_id as driver_id", [rideId, first.id]);
+  assert.equal(retry.driver_id, second.id);
+  assert.equal((await value("select count(*)::integer as count from public.ride_driver_cancellations where ride_id = $1", [rideId])).count, 1);
+});
+
+test("13. sem outro motorista, redistribuição aguarda prazo e termina sem prender passageiro", async () => {
+  await database.query("update public.drivers set online = false, available = false");
+  const passenger = await seedPassenger();
+  const driver = await seedDriver();
+  const rideId = await createRide(passenger);
+  await createOffer(rideId, driver.id);
+  assert.equal(await acceptRide(rideId, driver.id), true);
+  await database.query("update public.drivers set online = false where profile_id = $1", [driver.id]);
+  await database.query("insert into public.passenger_locations(passenger_id,ride_id,latitude,longitude) values ($1,$2,-10.8373,-38.5357)", [passenger, rideId]);
+  await database.query("select public.driver_cancel_and_redispatch($1,$2,'mechanical','Problema mecânico')", [rideId, driver.id]);
+  assert.equal((await value("select status from public.rides where id = $1", [rideId])).status, "procurando_motorista");
+  assert.equal((await value("select public.expire_ride_searches($1) as count", [rideId])).count, 0);
+  await database.query("update public.rides set redispatch_started_at = now() - interval '6 minutes' where id = $1", [rideId]);
+  assert.equal((await value("select public.expire_ride_searches($1) as count", [rideId])).count, 1);
+  assert.equal((await value("select status from public.rides where id = $1", [rideId])).status, "cancelada");
+  assert.equal((await value("select ride_id from public.passenger_locations where passenger_id = $1", [passenger])).ride_id, null);
+});
+
+test("14. viagem iniciada exige encerramento antecipado separado e registra o motivo", async () => {
+  const passenger = await seedPassenger();
+  const driver = await seedDriver();
+  const rideId = await createRide(passenger, { driverId: driver.id, vehicleId: driver.vehicleId, status: "em_corrida", startedAt: new Date(Date.now() - 60_000).toISOString() });
+  await database.query("update public.drivers set available = false where profile_id = $1", [driver.id]);
+  await database.query("update public.driver_locations set ride_id = $1 where driver_id = $2", [rideId, driver.id]);
+  await database.exec("update public.system_settings set value = value || '{\"configured\": true}'::jsonb where key = 'fare'");
+  assert.equal((await value("select public.driver_cancel_and_redispatch($1,$2,'unsafe','Local inseguro') as ride", [rideId, driver.id])).ride, null);
+  assert.equal((await value("select (public.end_ride_early($1,$2,'Passageiro pediu para parar')).status as status", [rideId, driver.id])).status, "finalizada");
+  assert.equal((await value("select early_end_reason from public.rides where id = $1", [rideId])).early_end_reason, "Passageiro pediu para parar");
+  assert.equal((await value("select (public.end_ride_early($1,$2,'Passageiro pediu para parar')).status as status", [rideId, driver.id])).status, "finalizada");
+  assert.equal((await value("select count(*)::integer as count from public.audit_logs where entity_id = $1 and action = 'ride.ended_early'", [rideId])).count, 1);
+  assert.equal((await value("select available from public.drivers where profile_id = $1", [driver.id])).available, true);
+});
+
+test("15. cancelamento do passageiro e do motorista preserva um único estado final", async () => {
+  await database.query("update public.drivers set online = false, available = false");
+  const passenger = await seedPassenger();
+  const driver = await seedDriver();
+  const rideId = await createRide(passenger);
+  await createOffer(rideId, driver.id);
+  assert.equal(await acceptRide(rideId, driver.id), true);
+  await database.query("select public.cancel_ride($1,$2,'Passageiro desistiu')", [rideId, passenger]);
+  assert.equal((await value("select public.driver_cancel_and_redispatch($1,$2,'unsafe','Local inseguro') as ride", [rideId, driver.id])).ride, null);
+  assert.equal((await value("select status from public.rides where id = $1", [rideId])).status, "cancelada");
+  assert.equal((await value("select count(*)::integer as count from public.ride_driver_cancellations where ride_id = $1", [rideId])).count, 0);
+
+  const nextPassenger = await seedPassenger();
+  const nextDriver = await seedDriver();
+  const nextRide = await createRide(nextPassenger);
+  await createOffer(nextRide, nextDriver.id);
+  assert.equal(await acceptRide(nextRide, nextDriver.id), true);
+  await database.query("select public.driver_cancel_and_redispatch($1,$2,'unsafe','Local inseguro')", [nextRide, nextDriver.id]);
+  await database.query("select public.cancel_ride($1,$2,'Passageiro desistiu')", [nextRide, nextPassenger]);
+  assert.equal((await value("select status from public.rides where id = $1", [nextRide])).status, "cancelada");
+  assert.equal((await value("select count(*)::integer as count from public.ride_driver_cancellations where ride_id = $1", [nextRide])).count, 1);
+  assert.equal((await value("select count(*)::integer as count from public.rides where passenger_id = $1", [nextPassenger])).count, 1);
+});
+
+test("16. migração de redistribuição tolera nova execução no SQL Editor", async () => {
+  const migration = await readFile(path.join(process.cwd(), "supabase", "migrations",
+    "20261001235000_driver_cancel_redispatch.sql"), "utf8");
+  await database.exec(migration);
+  assert.equal((await value("select count(*)::integer as count from information_schema.columns where table_schema = 'public' and table_name = 'rides' and column_name = 'redispatch_started_at'")).count, 1);
+  assert.equal((await value("select count(*)::integer as count from pg_trigger where tgname = 'link_redispatched_driver'")).count, 1);
+});
+
+test("17. ausência sem chegada GPS verificada é barrada também no banco", async () => {
+  const passenger = await seedPassenger();
+  const driver = await seedDriver();
+  const rideId = await createRide(passenger);
+  await createOffer(rideId, driver.id);
+  assert.equal(await acceptRide(rideId, driver.id), true);
+  await database.query("update public.rides set status = 'motorista_a_caminho' where id = $1", [rideId]);
+  await database.query("update public.rides set status = 'motorista_chegou', arrival_server_at = now() - interval '6 minutes', arrival_verified = false where id = $1", [rideId]);
+  await assert.rejects(database.query("select public.cancel_ride($1,$2,'NO_SHOW')", [rideId, driver.id]), /Ausencia exige chegada verificada/);
+  assert.equal((await value("select status from public.rides where id = $1", [rideId])).status, "motorista_chegou");
 });

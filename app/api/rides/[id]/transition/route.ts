@@ -2,8 +2,10 @@ import { z } from "zod";
 import { ApiError, audit, consumeRateLimit, jsonError, requireUser } from "@/lib/backend/api";
 import { distanceKm } from "@/lib/backend/routing";
 import { parseCancellationPolicy } from "@/lib/backend/cancellation-policy";
+import { dispatchPushQueue } from "@/lib/backend/push";
 
 const schema = z.object({ status: z.enum(["motorista_a_caminho", "motorista_chegou", "em_corrida", "finalizada", "cancelada"]), reason: z.string().max(300).optional(),
+  reasonCode: z.enum(["mechanical", "personal", "cannot_reach", "unsafe", "passenger_requested", "address", "other"]).optional(),
   offlineEvent: z.object({ eventId: z.string().uuid(), timestamp: z.string().datetime(), coordinates: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).nullable() }).optional() });
 const driverTransitions: Record<string, string> = { aceita: "motorista_a_caminho", motorista_a_caminho: "motorista_chegou", motorista_chegou: "em_corrida", em_corrida: "finalizada" };
 
@@ -32,9 +34,23 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     if (profile.blocked && (profile.role === "admin" || ride.status === "finalizada" || ride.status === "cancelada" || !["cancelada", "em_corrida", "finalizada", "motorista_a_caminho", "motorista_chegou"].includes(input.status)))
       throw new ApiError(403, "Conta bloqueada.", "ACCOUNT_BLOCKED");
+    if (input.status === "cancelada" && profile.role === "driver" && input.reason !== "NO_SHOW") {
+        if (!input.reasonCode || !input.reason?.trim())
+          throw new ApiError(422, "Informe o motivo do cancelamento.", "CANCELLATION_REASON_REQUIRED");
+        const { data: reassignedRide, error: reassignmentError } = await supabase.rpc("driver_cancel_and_redispatch", {
+          p_ride_id: id, p_driver_id: user.id, p_reason_code: input.reasonCode, p_reason_text: input.reason.trim(),
+        });
+        if (reassignmentError) throw reassignmentError;
+        if (!reassignedRide) throw new ApiError(409, "Esta corrida já mudou de etapa. Atualize para conferir.", "RIDE_STATE_CHANGED");
+        try { await dispatchPushQueue(50); } catch { /* A oferta permanece disponível por Realtime e polling. */ }
+        return Response.json({ rideId: id, status: reassignedRide.status, ride: reassignedRide,
+          redispatched: reassignedRide.status === "procurando_motorista" });
+    }
     const ownsRide = profile.role === "admin" || ride.passenger_id === user.id || ride.driver_id === user.id;
     if (!ownsRide) throw new ApiError(403, "Você não participa desta corrida.", "FORBIDDEN");
     if (input.status === "cancelada") {
+      if (profile.role === "driver" && input.reason === "NO_SHOW" && !ride.arrival_verified)
+        throw new ApiError(409, "Confirme a chegada ao embarque com GPS antes de registrar ausência.", "ARRIVAL_NOT_VERIFIED");
       const { data: changedRide, error: rpcError } = await supabase.rpc("cancel_ride", {
         p_ride_id: id,
         p_actor_id: user.id,

@@ -2157,9 +2157,9 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           ]
         : stage === "searching"
           ? [
-              "Solicitação enviada",
-              "Procurando um MotoPombal próximo…",
-              "Motoristas online da região receberam sua solicitação.",
+              ride?.redispatch_started_at ? "Motorista cancelou" : "Solicitação enviada",
+              ride?.redispatch_started_at ? "Procurando novo motorista..." : "Procurando um MotoPombal próximo…",
+              ride?.redispatch_started_at ? "O motorista precisou cancelar. Estamos procurando outro motorista para você." : "Motoristas online da região receberam sua solicitação.",
             ]
           : stage === "accepted"
             ? [
@@ -3328,6 +3328,18 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   );
 }
 
+const DRIVER_CANCEL_REASONS = [
+  { code: "mechanical", label: "Problema mecânico" },
+  { code: "personal", label: "Problema pessoal/emergência" },
+  { code: "cannot_reach", label: "Não consigo chegar ao passageiro" },
+  { code: "no_show", label: "Passageiro não apareceu" },
+  { code: "unsafe", label: "Local inseguro" },
+  { code: "passenger_requested", label: "Passageiro solicitou o cancelamento" },
+  { code: "address", label: "Problema com endereço/localização" },
+  { code: "other", label: "Outro motivo" },
+] as const;
+type DriverCancelReason = (typeof DRIVER_CANCEL_REASONS)[number]["code"];
+
 function DriverPanel({ backend }: { backend: Backend }) {
   const state = backend.driverState;
   const [busy, setBusy] = useState(false);
@@ -3338,6 +3350,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const [syncingOffline, setSyncingOffline] = useState(false);
   const [offlineConflict, setOfflineConflict] = useState("");
   const syncInFlightRef = useRef(false);
+  const cancelRetryingRef = useRef(false);
   const pendingOfflineCount = offlinePackage?.offlineEvents.filter((event) => event.status !== "synced").length || 0;
   const driverId = backend.session?.user.id;
   const serverRide = backend.activeRide;
@@ -3352,6 +3365,39 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const online = Boolean(state?.online);
   const hasActiveRide = Boolean(ride);
   const trackingGps = online || hasActiveRide;
+  const pendingCancellationKey = driverId ? `moto-pombal:pending-driver-cancel:${driverId}` : "";
+  useEffect(() => {
+    if (!pendingCancellationKey) return;
+    let disposed = false;
+    const retry = async () => {
+      if (disposed || cancelRetryingRef.current || !navigator.onLine) return;
+      let pending: { rideId: string; reasonCode: string; reason: string } | null = null;
+      try { pending = JSON.parse(window.localStorage.getItem(pendingCancellationKey) || "null"); } catch { window.localStorage.removeItem(pendingCancellationKey); }
+      if (!pending?.rideId || !pending.reasonCode || !pending.reason) return;
+      cancelRetryingRef.current = true;
+      try {
+        await backendRef.current.cancelDriverRide(pending.rideId, pending.reasonCode, pending.reason);
+        window.localStorage.removeItem(pendingCancellationKey);
+        await clearOfflineRide(pending.rideId).catch(() => undefined);
+        if (!disposed) {
+          setOfflinePackage(null);
+          setGpsExpanded(false);
+          setCancelStep(0);
+          setNotice("Cancelamento confirmado após reconectar.");
+          await backendRef.current.refresh().catch(() => undefined);
+        }
+      } catch (error) {
+        if (error instanceof BackendApiError && ["RIDE_STATE_CHANGED", "RIDE_NOT_FOUND", "CANCELLATION_REASON_REQUIRED", "FORBIDDEN", "CANCELLATION_NOT_ALLOWED"].includes(error.code)) {
+          window.localStorage.removeItem(pendingCancellationKey);
+          if (!disposed) await backendRef.current.refresh().catch(() => undefined);
+        }
+      } finally { cancelRetryingRef.current = false; }
+    };
+    void retry();
+    window.addEventListener("online", retry);
+    const timer = window.setInterval(retry, 15000);
+    return () => { disposed = true; window.removeEventListener("online", retry); window.clearInterval(timer); };
+  }, [pendingCancellationKey]);
   useEffect(() => {
     connectivityManager.start();
     return () => connectivityManager.stop();
@@ -3493,6 +3539,11 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const [testingAlert, setTestingAlert] = useState(false);
   const [gpsExpanded, setGpsExpanded] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
+  const [cancelStep, setCancelStep] = useState<0 | 1 | 2>(0);
+  const [cancelReason, setCancelReason] = useState<DriverCancelReason | "">("");
+  const [cancelOther, setCancelOther] = useState("");
+  const [earlyEndOpen, setEarlyEndOpen] = useState(false);
+  const [earlyEndReason, setEarlyEndReason] = useState("");
   const [followDriver, setFollowDriver] = useState(true);
   const [navigationCenterRequest, setNavigationCenterRequest] = useState(0);
   const [liveLocation, setLiveLocation] = useState<LivePoint>();
@@ -4216,7 +4267,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
       setBusy(false);
     }
   }
-  async function cancelRide(reason = "Cancelada pelo motorista") {
+  async function cancelRide(reason = "NO_SHOW") {
     if (!ride) return;
     setBusy(true);
     try {
@@ -4225,6 +4276,10 @@ function DriverPanel({ backend }: { backend: Backend }) {
         "cancelada",
         reason,
       );
+      setOfflinePackage(null);
+      setGpsExpanded(false);
+      setContactOpen(false);
+      await clearOfflineRide(ride.id).catch(() => undefined);
       await backend.refresh();
     } catch (error) {
       setNotice(
@@ -4235,6 +4290,56 @@ function DriverPanel({ backend }: { backend: Backend }) {
     } finally {
       setBusy(false);
     }
+  }
+  async function confirmDriverCancellation() {
+    if (!ride || !cancelReason || cancelReason === "no_show" || (cancelReason === "other" && !cancelOther.trim()) || busy) return;
+    const cancellingRideId = ride.id;
+    const label = DRIVER_CANCEL_REASONS.find((item) => item.code === cancelReason)?.label || "Cancelamento";
+    const reason = cancelReason === "other" ? cancelOther.trim() : label;
+    setBusy(true);
+    cancelRetryingRef.current = true;
+    try { window.localStorage.setItem(pendingCancellationKey, JSON.stringify({ rideId: cancellingRideId, reasonCode: cancelReason, reason })); } catch { /* A confirmação ainda funciona sem armazenamento local. */ }
+    try {
+      await backend.cancelDriverRide(cancellingRideId, cancelReason, reason);
+      window.localStorage.removeItem(pendingCancellationKey);
+      setOfflinePackage(null);
+      setGpsExpanded(false);
+      setContactOpen(false);
+      setCancelStep(0);
+      setCancelReason("");
+      setCancelOther("");
+      setOfflineConflict("");
+      setNotice("Corrida cancelada. O passageiro está procurando outro motorista.");
+      await clearOfflineRide(cancellingRideId).catch(() => undefined);
+      await backend.refresh().catch(() => undefined);
+      await backend.refreshDriverQueue().catch(() => undefined);
+    } catch (error) {
+      if (error instanceof BackendApiError && ["RIDE_STATE_CHANGED", "RIDE_NOT_FOUND", "CANCELLATION_REASON_REQUIRED", "FORBIDDEN", "CANCELLATION_NOT_ALLOWED"].includes(error.code))
+        window.localStorage.removeItem(pendingCancellationKey);
+      setNotice(error instanceof Error ? error.message : "Não foi possível confirmar agora. Tentaremos novamente quando a conexão voltar.");
+      await backend.refresh().catch(() => undefined);
+    } finally {
+      cancelRetryingRef.current = false;
+      setBusy(false);
+    }
+  }
+  async function confirmEarlyEnd() {
+    if (!ride || ride.status !== "em_corrida" || earlyEndReason.trim().length < 3 || busy) return;
+    const endingRideId = ride.id;
+    setBusy(true);
+    try {
+      await backend.endRideEarly(endingRideId, earlyEndReason.trim());
+      setOfflinePackage(null);
+      setGpsExpanded(false);
+      setEarlyEndOpen(false);
+      setEarlyEndReason("");
+      setNotice("Viagem encerrada antecipadamente e registrada para o administrador.");
+      await clearOfflineRide(endingRideId).catch(() => undefined);
+      await backend.refresh().catch(() => undefined);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Não foi possível encerrar a viagem.");
+      await backend.refresh().catch(() => undefined);
+    } finally { setBusy(false); }
   }
   async function advance() {
     if (!ride) return;
@@ -4701,6 +4806,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
                   disabled={busy || (ride.status === "aceita" && !pickupNavigationReady) || (ride.status === "motorista_a_caminho" && !arrivalReady)}
                   onClick={advance}>{ride.status === "aceita" ? "Ir até passageiro" : ride.status === "motorista_a_caminho" ? "Cheguei" : ride.status === "motorista_chegou" ? "Iniciar corrida" : "Finalizar corrida"}</button>
               </div>
+              {ride.status !== "em_corrida" && <button type="button" className="driver-nav-fallback" disabled={busy} onClick={() => setCancelStep(1)}>Cancelar corrida</button>}
+              {ride.status === "em_corrida" && <button type="button" className="driver-nav-fallback" disabled={busy} onClick={() => setEarlyEndOpen(true)}>Encerrar viagem antecipadamente</button>}
               {ride.status === "motorista_a_caminho" && distanceToTarget > backend.cancellationPolicy.arrival_radius_meters &&
                 <p className="driver-nav-notice">Chegue a até {backend.cancellationPolicy.arrival_radius_meters} m do embarque para confirmar.</p>}
               {ride.status === "motorista_a_caminho" && distanceToTarget <= backend.cancellationPolicy.arrival_radius_meters && !arrivalReady &&
@@ -4719,7 +4826,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
                   <a href={`tel:${ride.passenger.phone}`}><Phone /> Ligar</a>
                   <a href={`sms:${ride.passenger.phone}`}><MessageCircle /> Enviar SMS</a>
                 </div> : <p>O telefone do passageiro não está disponível nesta corrida.</p>}
-                {ride.status !== "em_corrida" && <button type="button" className="driver-contact-cancel" disabled={busy} onClick={() => { setContactOpen(false); void cancelRide(); }}>Cancelar corrida</button>}
+                {ride.status !== "em_corrida" && <button type="button" className="driver-contact-cancel" disabled={busy} onClick={() => { setContactOpen(false); setCancelStep(1); }}>Cancelar corrida</button>}
               </section>
             </div>}
             {noShowConfirmOpen && <div className="driver-contact-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setNoShowConfirmOpen(false); }}>
@@ -4732,6 +4839,33 @@ function DriverPanel({ backend }: { backend: Backend }) {
             </div>}
           </section>
         )}
+        {ride && cancelStep > 0 && ride.status !== "em_corrida" && <div className="driver-contact-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setCancelStep(0); }}>
+          <section className="driver-contact-sheet driver-cancel-sheet" role="alertdialog" aria-modal="true" aria-labelledby="driver-cancel-title">
+            <header><h2 id="driver-cancel-title">Cancelar esta corrida?</h2><button type="button" disabled={busy} onClick={() => setCancelStep(0)} aria-label="Fechar"><X /></button></header>
+            {cancelStep === 1 ? <>
+              <p>Informe o motivo do cancelamento. O passageiro continuará procurando outro motorista.</p>
+              <div className="driver-cancel-reasons" role="radiogroup" aria-label="Motivo do cancelamento">
+                {DRIVER_CANCEL_REASONS.map((item) => <label key={item.code}><input type="radio" name="driver-cancel-reason" value={item.code} checked={cancelReason === item.code} disabled={item.code === "no_show" && (ride.status !== "motorista_chegou" || !ride.arrival_verified || noShowRemaining === null || noShowRemaining > 0)} onChange={() => setCancelReason(item.code)} />{item.label}</label>)}
+              </div>
+              {cancelReason === "other" && <label className="driver-cancel-other">Descreva o motivo<textarea value={cancelOther} maxLength={300} onChange={(event) => setCancelOther(event.target.value)} /></label>}
+              <div className="driver-contact-actions"><button type="button" onClick={() => setCancelStep(0)}>Voltar</button><button type="button" disabled={!cancelReason || (cancelReason === "other" && !cancelOther.trim()) || busy} onClick={() => {
+                if (cancelReason === "no_show") { setCancelStep(0); setNoShowConfirmOpen(true); }
+                else setCancelStep(2);
+              }}>Continuar</button></div>
+            </> : <>
+              <p>Confirma o cancelamento por <strong>{DRIVER_CANCEL_REASONS.find((item) => item.code === cancelReason)?.label}</strong>? Esta ação será registrada para o administrador.</p>
+              <div className="driver-contact-actions"><button type="button" disabled={busy} onClick={() => setCancelStep(1)}>Voltar</button><button type="button" disabled={busy} onClick={() => void confirmDriverCancellation()}>{busy ? "Cancelando…" : "Confirmar cancelamento"}</button></div>
+            </>}
+          </section>
+        </div>}
+        {ride?.status === "em_corrida" && earlyEndOpen && <div className="driver-contact-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setEarlyEndOpen(false); }}>
+          <section className="driver-contact-sheet driver-cancel-sheet" role="alertdialog" aria-modal="true" aria-labelledby="early-end-title">
+            <header><h2 id="early-end-title">Encerrar viagem antecipadamente?</h2><button type="button" disabled={busy} onClick={() => setEarlyEndOpen(false)} aria-label="Fechar"><X /></button></header>
+            <p>Esta viagem já começou. O encerramento será registrado para o administrador, com o motivo e o valor calculado pelas regras vigentes.</p>
+            <label className="driver-cancel-other">Motivo obrigatório<textarea value={earlyEndReason} maxLength={300} onChange={(event) => setEarlyEndReason(event.target.value)} /></label>
+            <div className="driver-contact-actions"><button type="button" disabled={busy} onClick={() => setEarlyEndOpen(false)}>Voltar</button><button type="button" disabled={busy || earlyEndReason.trim().length < 3} onClick={() => void confirmEarlyEnd()}>{busy ? "Encerrando…" : "Confirmar encerramento"}</button></div>
+          </section>
+        </div>}
         {notice && <div className="backend-warning">{notice}</div>}
         {offlineConflict && <div className="driver-offline-conflict" role="alert"><strong>Sincronização requer atenção</strong><span>{offlineConflict}</span><small>Não continue etapas desta corrida até a central confirmar o estado.</small></div>}
         {syncingOffline && pendingOfflineCount > 0 && <div className="driver-offline-sync" role="status">Sincronizando {pendingOfflineCount} {pendingOfflineCount === 1 ? "etapa" : "etapas"} da corrida…</div>}
@@ -4907,10 +5041,11 @@ function DriverPanel({ backend }: { backend: Backend }) {
                 </Button>
               )}
               {ride.status !== "em_corrida" && (
-                <Button disabled={busy} variant="outline" onClick={() => void cancelRide()}>
+                <Button disabled={busy} variant="outline" onClick={() => setCancelStep(1)}>
                   CANCELAR
                 </Button>
               )}
+              {ride.status === "em_corrida" && <Button disabled={busy} variant="outline" onClick={() => setEarlyEndOpen(true)}>ENCERRAR ANTECIPADAMENTE</Button>}
               <Button disabled={busy || (ride.status === "aceita" && !pickupNavigationReady) || (ride.status === "motorista_a_caminho" && !arrivalReady)} className="primary-cta" onClick={advance}>
                 {ride.status === "aceita"
                   ? "IR ATÉ PASSAGEIRO"

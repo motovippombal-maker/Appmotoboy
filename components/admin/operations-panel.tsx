@@ -92,9 +92,21 @@ type AdminRide = {
     approach_points?: number; verified_displacement_meters?: number } | null;
   termination_code: string | null;
   no_show_at: string | null;
+  early_end_reason: string | null;
+  early_end_at: string | null;
   passenger: { full_name: string; phone: string | null } | null;
   driver: { full_name: string; phone: string | null } | null;
 };
+type DriverCancellation = {
+  id: number; ride_id: string; driver_id: string; passenger_id: string;
+  previous_status: string; reason_code: string; reason_text: string;
+  accepted_at: string | null; arrived_at: string | null; cancelled_at: string;
+  gps_lat: number | null; gps_lng: number | null; gps_accuracy_meters: number | null;
+  next_driver_id: string | null; next_accepted_at: string | null;
+  driver_name: string; passenger_name: string; next_driver_name: string | null;
+  ride: { origin_address: string; destination_address: string; requested_at: string; status: string } | null;
+};
+type CancellationMetric = { driver_id: string; driver_name: string; accepted: number; completed: number; cancelled: number; cancellation_rate: number };
 type AdminPassenger = {
   profile_id: string;
   created_at: string;
@@ -164,6 +176,7 @@ const date = (value?: string | null) =>
 const rideLabel = (status: string) =>
   ({
     solicitada: "Solicitada",
+    procurando_motorista: "Procurando motorista",
     aceita: "Aceita",
     motorista_a_caminho: "A caminho",
     motorista_chegou: "Motorista chegou",
@@ -203,6 +216,7 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
     minimum: string;
   } | null>(null);
   const [selectedRide, setSelectedRide] = useState<AdminRide | null>(null);
+  const [selectedCancellation, setSelectedCancellation] = useState<DriverCancellation | null>(null);
   const [selectedPassenger, setSelectedPassenger] =
     useState<AdminPassenger | null>(null);
   const [selectedDriver, setSelectedDriver] = useState<AdminDriver | null>(
@@ -217,6 +231,8 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
     lng: -38.5357,
   });
   const [rides, setRides] = useState<AdminRide[]>([]);
+  const [driverCancellations, setDriverCancellations] = useState<DriverCancellation[]>([]);
+  const [cancellationMetrics, setCancellationMetrics] = useState<CancellationMetric[]>([]);
   const [passengers, setPassengers] = useState<AdminPassenger[]>([]);
   const [loadingLists, setLoadingLists] = useState(true);
   const [listError, setListError] = useState("");
@@ -260,13 +276,16 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
     let cancelled = false;
     const load = async () => {
       try {
-        const [rideData, passengerData] = await Promise.all([
+        const [rideData, passengerData, cancellationData] = await Promise.all([
           adminGet<{ rides: AdminRide[] }>("/api/admin/rides"),
           adminGet<{ passengers: AdminPassenger[] }>("/api/admin/passengers"),
+          adminGet<{ cancellations: DriverCancellation[]; metrics: CancellationMetric[] }>("/api/admin/driver-cancellations"),
         ]);
         if (!cancelled) {
           setRides(rideData.rides);
           setPassengers(passengerData.passengers);
+          setDriverCancellations(cancellationData.cancellations);
+          setCancellationMetrics(cancellationData.metrics);
           setListError("");
         }
       } catch (error) {
@@ -296,9 +315,11 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
     const interval = window.setInterval(() => {
       if (!document.hidden) void load();
     }, 30000);
+    window.addEventListener("moto-pombal:rides-changed", load);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      window.removeEventListener("moto-pombal:rides-changed", load);
     };
     // Session token changes only on reauthentication; the backend refreshes the operational summary separately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -312,9 +333,9 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
       `${ride.id} ${ride.passenger?.full_name || ""} ${ride.driver?.full_name || ""} ${ride.origin_address} ${ride.destination_address}`.toLowerCase();
     const group =
       rideFilter === "Ativas"
-        ? !["solicitada", "finalizada", "cancelada"].includes(ride.status)
+        ? !["solicitada", "procurando_motorista", "finalizada", "cancelada"].includes(ride.status)
         : rideFilter === "Aguardando"
-          ? ride.status === "solicitada"
+          ? ["solicitada", "procurando_motorista"].includes(ride.status)
           : rideFilter === "Finalizadas"
             ? ride.status === "finalizada"
             : rideFilter === "Canceladas"
@@ -939,6 +960,24 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
                     "As corridas desta categoria aparecerão aqui.",
                   )
                 )}
+              </section>
+              <section className="ops-card">
+                <div className="ops-card-head"><h2>Cancelamentos pelo motorista</h2></div>
+                {driverCancellations.length ? <div className="ops-table-wrap"><table>
+                  <thead><tr><th>Corrida</th><th>Motorista</th><th>Passageiro</th><th>Motivo</th><th>Etapa</th><th>Horário</th><th></th></tr></thead>
+                  <tbody>{driverCancellations.map((item) => <tr key={item.id}>
+                    <td>#{item.ride_id.slice(0, 8)}</td><td>{item.driver_name}</td><td>{item.passenger_name}</td>
+                    <td>{item.reason_text}</td><td>{rideLabel(item.previous_status)}</td><td>{date(item.cancelled_at)}</td>
+                    <td><button type="button" className="ops-small-button" onClick={() => setSelectedCancellation(item)}>Detalhes</button></td>
+                  </tr>)}</tbody>
+                </table></div> : <p>Nenhum cancelamento pelo motorista registrado.</p>}
+              </section>
+              <section className="ops-card">
+                <div className="ops-card-head"><h2>Indicadores por motorista</h2></div>
+                {cancellationMetrics.length ? <div className="ops-table-wrap"><table>
+                  <thead><tr><th>Motorista</th><th>Aceitas</th><th>Concluídas</th><th>Cancelamentos</th><th>Taxa de cancelamento</th></tr></thead>
+                  <tbody>{cancellationMetrics.map((item) => <tr key={item.driver_id}><td>{item.driver_name}</td><td>{item.accepted}</td><td>{item.completed}</td><td>{item.cancelled}</td><td>{item.cancellation_rate}%</td></tr>)}</tbody>
+                </table></div> : <p>Sem indicadores ainda.</p>}
               </section>
             </>
           )}
@@ -1953,11 +1992,12 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
           )}
         </main>
       </div>
-      {(selectedRide || selectedPassenger || selectedDriver || placeEditor) && (
+      {(selectedRide || selectedCancellation || selectedPassenger || selectedDriver || placeEditor) && (
         <div
           className="ops-drawer-backdrop"
           onClick={() => {
             setSelectedRide(null);
+            setSelectedCancellation(null);
             setSelectedPassenger(null);
             setSelectedDriver(null);
             setPlaceEditor(false);
@@ -1973,7 +2013,9 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
               <div>
                 <small>MOTOPOMBAL · ADMIN</small>
                 <h2>
-                  {selectedRide
+                  {selectedCancellation
+                    ? `Cancelamento #${selectedCancellation.ride_id.slice(0, 8)}`
+                    : selectedRide
                     ? `Corrida #${selectedRide.id.slice(0, 8)}`
                     : selectedPassenger
                       ? selectedPassenger.profiles?.full_name || "Passageiro"
@@ -1988,6 +2030,7 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
                 type="button"
                 onClick={() => {
                   setSelectedRide(null);
+                  setSelectedCancellation(null);
                   setSelectedPassenger(null);
                   setSelectedDriver(null);
                   setPlaceEditor(false);
@@ -1997,6 +2040,24 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
                 <X />
               </button>
             </div>
+            {selectedCancellation && <div className="ops-detail"><dl>
+              <dt>Corrida</dt><dd>#{selectedCancellation.ride_id.slice(0, 8)}</dd>
+              <dt>Motorista</dt><dd>{selectedCancellation.driver_name}</dd>
+              <dt>Passageiro</dt><dd>{selectedCancellation.passenger_name}</dd>
+              <dt>Origem</dt><dd>{selectedCancellation.ride?.origin_address || "—"}</dd>
+              <dt>Destino</dt><dd>{selectedCancellation.ride?.destination_address || "—"}</dd>
+              <dt>Etapa anterior</dt><dd>{rideLabel(selectedCancellation.previous_status)}</dd>
+              <dt>Motivo</dt><dd>{selectedCancellation.reason_text}</dd>
+              <dt>Solicitada</dt><dd>{date(selectedCancellation.ride?.requested_at)}</dd>
+              <dt>Aceita</dt><dd>{date(selectedCancellation.accepted_at)}</dd>
+              <dt>Cancelada</dt><dd>{date(selectedCancellation.cancelled_at)}</dd>
+              <dt>Tempo após aceite</dt><dd>{selectedCancellation.accepted_at ? `${Math.max(0, Math.round((Date.parse(selectedCancellation.cancelled_at) - Date.parse(selectedCancellation.accepted_at)) / 60000))} min` : "—"}</dd>
+              <dt>Chegou ao embarque</dt><dd>{selectedCancellation.arrived_at ? "Sim" : "Não"}</dd>
+              <dt>Tempo de espera</dt><dd>{selectedCancellation.arrived_at ? `${Math.max(0, Math.round((Date.parse(selectedCancellation.cancelled_at) - Date.parse(selectedCancellation.arrived_at)) / 60_000))} min` : "—"}</dd>
+              <dt>Redistribuída</dt><dd>{selectedCancellation.next_driver_id ? "Sim" : selectedCancellation.ride?.status === "procurando_motorista" ? "Procurando motorista" : "Sem novo motorista"}</dd>
+              <dt>Motorista seguinte</dt><dd>{selectedCancellation.next_driver_name || "—"}</dd>
+              <dt>GPS registrado</dt><dd>{selectedCancellation.gps_lat != null && selectedCancellation.gps_lng != null ? `${selectedCancellation.gps_lat.toFixed(5)}, ${selectedCancellation.gps_lng.toFixed(5)} (${selectedCancellation.gps_accuracy_meters ?? "?"} m)` : "Indisponível"}</dd>
+            </dl></div>}
             {selectedRide && (
               <div className="ops-detail">
                 <span className={`ops-badge ${selectedRide.status}`}>
@@ -2032,6 +2093,7 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
                   <dd>{date(selectedRide.started_at)}</dd>
                   <dt>Conclusão</dt>
                   <dd>{date(selectedRide.finished_at)}</dd>
+                  {selectedRide.early_end_at && <><dt>Encerramento antecipado</dt><dd>{date(selectedRide.early_end_at)}</dd><dt>Motivo informado</dt><dd>{selectedRide.early_end_reason || "—"}</dd></>}
                   {selectedRide.status === "cancelada" && <>
                     <dt>Encerramento</dt><dd>{selectedRide.termination_code === "no_show" ? "Passageiro não apareceu" : "Cancelamento"}</dd>
                     <dt>Cancelada em</dt><dd>{date(selectedRide.cancelled_at)}</dd>

@@ -62,9 +62,11 @@ export type Ride = {
   accepted_at?: string;
   arrived_at?: string;
   arrival_server_at?: string;
+  arrival_verified?: boolean;
   completed_at?: string;
   cancelled_at?: string | null;
   cancelled_by?: string | null;
+  redispatch_started_at?: string | null;
   cancellation_fee_cents?: number;
   cancellation_fee_reason?: string | null;
   created_at: string;
@@ -807,6 +809,12 @@ export function useMotoVip() {
                 status: "cancelada", cancelled_at: changed.cancelled_at || null, cancelled_by: changed.cancelled_by || null,
                 cancellation_fee_cents: changed.cancellation_fee_cents, cancellation_fee_reason: changed.cancellation_fee_reason });
           }
+          if (profileRole === "driver" && activeRideId && changed.id === activeRideId &&
+            changed.driver_id === null && changed.status === "procurando_motorista") {
+            setActiveRide(null);
+            setDriverLocation(null);
+          }
+          window.dispatchEvent(new Event("moto-pombal:rides-changed"));
           void refresh(session).catch(() => undefined);
         },
       );
@@ -1256,6 +1264,25 @@ export function useMotoVip() {
         method: "POST",
         body: JSON.stringify({ status, reason, offlineEvent }),
       }),
+    cancelDriverRide: async (rideId: string, reasonCode: string, reason: string) => {
+      const result = await api<{ rideId: string; status: string; ride?: Ride }>(`/api/rides/${rideId}/transition`, {
+        method: "POST",
+        body: JSON.stringify({ status: "cancelada", reasonCode, reason }),
+      });
+      setActiveRide((current) => current?.id === rideId ? null : current);
+      setDriverLocation(null);
+      setOffers([]);
+      return result;
+    },
+    endRideEarly: async (rideId: string, reason: string) => {
+      const result = await api<{ ride: Ride }>(`/api/rides/${rideId}/early-end`, {
+        method: "POST", body: JSON.stringify({ reason }),
+      });
+      setActiveRide((current) => current?.id === rideId ? null : current);
+      setDriverLocation(null);
+      setCompletedRide(result.ride);
+      return result;
+    },
     setDriverStatus: (online: boolean, location?: GeolocationCoordinates) =>
       api("/api/drivers/status", {
         method: "POST",
