@@ -22,15 +22,17 @@ export async function GET(request: Request) {
     let completedRide = null;
     let cancelledRide = null;
     if (!activeRide) {
-      const completedQuery = supabase.from("rides").select("*")
+      // Only the latest finished ride may produce the completion card. An
+      // older completed ride must not reappear after a newer cancellation.
+      const latestTerminalQuery = supabase.from("rides").select("*")
         .eq(ownerColumn, user.id)
-        .eq("status", "finalizada")
-        .order("completed_at", { ascending: false })
+        .in("status", ["finalizada", "cancelada"])
+        .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      const { data, error: completedError } = await completedQuery;
-      if (completedError) throw completedError;
-      completedRide = data;
+      const { data: latestTerminal, error: terminalError } = await latestTerminalQuery;
+      if (terminalError) throw terminalError;
+      completedRide = latestTerminal?.status === "finalizada" ? latestTerminal : null;
       if (profile.role === "driver") {
         const { data: cancelled, error: cancelledError } = await supabase.from("rides")
           .select("id,driver_id,passenger_id,status,cancelled_at,cancelled_by,cancellation_fee_cents,cancellation_fee_reason")
