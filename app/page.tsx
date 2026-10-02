@@ -3355,12 +3355,14 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const pendingOfflineCount = offlinePackage?.offlineEvents.filter((event) => event.status !== "synced").length || 0;
   const driverId = backend.session?.user.id;
   const serverRide = backend.activeRide;
-  const pendingLocalStatus = offlinePackage?.offlineEvents.some((event) => event.status !== "synced");
+  const pendingLocalStatus = (!serverRide || offlinePackage?.ride.id === serverRide.id)
+    && offlinePackage?.offlineEvents.some((event) => event.status !== "synced");
   const ride = useMemo(() => selectDriverRide({ serverRide, offlinePackage,
     cancelledRideId: backend.cancelledRide?.id,
     serverVerified: backend.rideSnapshotVerified, serverReachable: connectivity !== "OFFLINE" }),
   [backend.cancelledRide?.id, backend.rideSnapshotVerified, connectivity, offlinePackage, serverRide]);
-  const localFinished = offlinePackage?.navigationState === "finalizada" && pendingOfflineCount > 0;
+  const currentOfflinePackage = offlinePackage?.ride.id === ride?.id ? offlinePackage : null;
+  const localFinished = currentOfflinePackage?.navigationState === "finalizada" && pendingOfflineCount > 0;
   const completedRide = ride ? null : backend.completedRide;
   const offer = backend.offers[0];
   const online = Boolean(state?.online);
@@ -3405,7 +3407,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
   }, []);
   useEffect(() => connectivityManager.subscribe(setConnectivity), []);
   useEffect(() => {
-    if (!driverId || !pendingOfflineCount || connectivity === "OFFLINE") return;
+    if (!driverId || !pendingOfflineCount || connectivity === "OFFLINE" ||
+      (backend.activeRide && backend.activeRide.id !== offlinePackage?.ride.id)) return;
     let cancelled = false;
     const synchronize = () => {
       if (syncInFlightRef.current) return;
@@ -3431,7 +3434,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
     const timer = window.setTimeout(synchronize, 0);
     const interval = window.setInterval(synchronize, 15000);
     return () => { cancelled = true; window.clearTimeout(timer); window.clearInterval(interval); };
-  }, [driverId, pendingOfflineCount, connectivity]);
+  }, [driverId, pendingOfflineCount, connectivity, backend.activeRide?.id, offlinePackage?.ride.id]);
   useEffect(() => {
     if (!driverId) return;
     let active = true;
@@ -3442,13 +3445,20 @@ function DriverPanel({ backend }: { backend: Backend }) {
     if (!offlinePackage || busy ||
       (backend.cancelledRide?.id !== offlinePackage.ride.id && (!backend.rideSnapshotVerified || connectivity === "OFFLINE"))) return;
     if (backend.activeRide?.id === offlinePackage.ride.id) return;
+    const obsoleteRideId = offlinePackage.ride.id;
+    if (backend.activeRide) {
+      void clearOfflineRide(obsoleteRideId).then(() => setOfflinePackage((current) =>
+        current?.ride.id === obsoleteRideId ? null : current)).catch(() => undefined);
+      return;
+    }
     const cancelledByPassenger = backend.cancelledRide?.id === offlinePackage.ride.id
       && backend.cancelledRide.cancelled_by === offlinePackage.ride.passenger_id;
     setNotice(cancelledByPassenger
       ? `Corrida cancelada pelo passageiro.${backend.cancelledRide?.cancellation_fee_cents
         ? ` Taxa avaliada: ${money(backend.cancelledRide.cancellation_fee_cents)}.` : ""}`
       : "Corrida encerrada no servidor.");
-    void clearOfflineRide(offlinePackage.ride.id).then(() => setOfflinePackage(null)).catch(() => undefined);
+    void clearOfflineRide(obsoleteRideId).then(() => setOfflinePackage((current) =>
+      current?.ride.id === obsoleteRideId ? null : current)).catch(() => undefined);
     void backendRef.current.refreshDriverQueue();
   }, [offlinePackage, busy, backend.rideSnapshotVerified, backend.activeRide, backend.cancelledRide, connectivity]);
   useEffect(() => {
@@ -3456,7 +3466,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
     const serverStatus = backend.completedRide?.id === offlinePackage.ride.id ? backend.completedRide.status
       : backend.activeRide?.id === offlinePackage.ride.id ? backend.activeRide.status : null;
     if (serverStatus !== "finalizada" && serverStatus !== "cancelada") return;
-    void clearOfflineRide(offlinePackage.ride.id).then(() => setOfflinePackage(null)).catch(() => undefined);
+    const obsoleteRideId = offlinePackage.ride.id;
+    void clearOfflineRide(obsoleteRideId).then(() => setOfflinePackage((current) =>
+      current?.ride.id === obsoleteRideId ? null : current)).catch(() => undefined);
   }, [offlinePackage, pendingOfflineCount, connectivity, backend.completedRide, backend.activeRide]);
   useEffect(() => {
     if (!online && !hasActiveRide) return;
@@ -3616,14 +3628,14 @@ function DriverPanel({ backend }: { backend: Backend }) {
     backendRef.current = backend;
   }, [backend]);
   useEffect(() => {
-    if (!offlinePackage?.lastKnownPosition || liveLocation) return;
-    const last = offlinePackage.lastKnownPosition;
+    if (!currentOfflinePackage?.lastKnownPosition || liveLocation) return;
+    const last = currentOfflinePackage.lastKnownPosition;
     const timer = window.setTimeout(() => {
       setLiveLocation({ lat: last.lat, lng: last.lng, label: "Última posição conhecida" });
       setGpsStatus("Localização temporariamente indisponível; aguardando GPS.");
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [offlinePackage, liveLocation]);
+  }, [currentOfflinePackage, liveLocation]);
   useEffect(() => {
     if (online || rideId || !("geolocation" in navigator)) return;
     let active = true;
@@ -3955,13 +3967,13 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const navPhase = trackingPhase(ride?.status);
   const targetLat = ride ? navPhase === "trip" ? ride.destination_lat : ride.origin_lat : undefined;
   const targetLng = ride ? navPhase === "trip" ? ride.destination_lng : ride.origin_lng : undefined;
-  const savedNavigationRoute = navPhase === "trip" ? offlinePackage?.routeToDestination : offlinePackage?.routeToPickup;
+  const savedNavigationRoute = navPhase === "trip" ? currentOfflinePackage?.routeToDestination : currentOfflinePackage?.routeToPickup;
   const onlineNavEta = trackingEta && trackingEta.phase === navPhase && targetLat !== undefined && targetLng !== undefined
     && Math.abs(trackingEta.to.lat - targetLat) < 0.000001 && Math.abs(trackingEta.to.lng - targetLng) < 0.000001
     ? trackingEta : null;
   const navEta: TrackingRoute | null = onlineNavEta ? onlineNavEta : savedNavigationRoute && targetLat !== undefined && targetLng !== undefined
-    ? { ...savedNavigationRoute, from: { lat: liveLocation?.lat ?? 0, lng: liveLocation?.lng ?? 0, updatedAt: offlinePackage?.updatedAt || "" },
-      to: { lat: targetLat, lng: targetLng }, calculatedAt: offlinePackage?.updatedAt || "" }
+    ? { ...savedNavigationRoute, from: { lat: liveLocation?.lat ?? 0, lng: liveLocation?.lng ?? 0, updatedAt: currentOfflinePackage?.updatedAt || "" },
+      to: { lat: targetLat, lng: targetLng }, calculatedAt: currentOfflinePackage?.updatedAt || "" }
     : null;
   const navGeometry = navEta?.geometry;
   const navigationRoute = useMemo(() => routePoints(navGeometry), [navGeometry]);
@@ -4274,8 +4286,13 @@ function DriverPanel({ backend }: { backend: Backend }) {
     const mapReady = Boolean(freshPoint && graph && [freshPoint, pickupPoint, destinationPoint].every((item) => isInsideRegion(item.lat, item.lng)));
     const data = makeOfflineRide(baseRide, driverId, pickup, trip, mapReady);
     const confirmed = await backend.getRideSnapshot().catch(() => null);
-    if (confirmed && confirmed.ride?.id !== acceptedRide.id) return false;
+    if (confirmed ? confirmed.ride?.id !== acceptedRide.id : rideIdRef.current !== acceptedRide.id) return false;
+    if (rideIdRef.current && rideIdRef.current !== acceptedRide.id) return false;
     await saveOfflineRide(data);
+    if (rideIdRef.current && rideIdRef.current !== acceptedRide.id) {
+      await clearOfflineRide(acceptedRide.id);
+      return false;
+    }
     setOfflinePackage(data);
     if (!freshPoint) {
       setNotice(pickup
@@ -4464,7 +4481,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
           if (arrivalPosition || error instanceof BackendApiError) throw error;
         }
       }
-      if (!offlineType || !offlinePackage || !offlinePackage.mapReady || !offlinePackage.routeToPickup || !offlinePackage.routeToDestination)
+      if (!offlineType || !currentOfflinePackage || !currentOfflinePackage.mapReady || !currentOfflinePackage.routeToPickup || !currentOfflinePackage.routeToDestination)
         throw new Error("Pacote offline incompleto. Aguarde a conexão antes de alterar esta corrida.");
       const updated = await queueOfflineTransition(ride.id, offlineType,
         arrivalPosition ? { lat: arrivalPosition.coords.latitude, lng: arrivalPosition.coords.longitude }
