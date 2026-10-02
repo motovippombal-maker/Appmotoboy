@@ -14,7 +14,7 @@
     "test:pricing": "tsx --test tests/pricing-service-area.test.ts",
     "test:location": "tsx --test tests/location-map-address.test.ts",
     "test:tracking": "tsx --test tests/realtime-tracking.test.ts",
-    "test:driver": "tsx --test tests/driver-navigation.test.ts tests/driver-alert.test.ts",
+    "test:driver": "tsx --test tests/driver-navigation.test.ts tests/driver-alert.test.ts tests/driver-gps.test.ts",
     "test:offline": "tsx --test tests/offline-navigation.test.ts",
     "test:mobile": "tsx --test tests/mobile-history-notifications.test.ts",
     "test:auth": "tsx --test tests/auth-phone-flow.test.ts tests/auth-mobile-visual.test.ts",

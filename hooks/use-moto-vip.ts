@@ -979,6 +979,7 @@ export function useMotoVip() {
     (position: GeolocationPosition, rideId?: string) =>
       api("/api/location", {
         method: "POST",
+        signal: AbortSignal.timeout(10_000),
         body: JSON.stringify({
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
@@ -1200,7 +1201,7 @@ export function useMotoVip() {
     }),
     prepareNavigation: (rideId: string, point: { lat: number; lng: number; accuracyMeters?: number }) =>
       api<{ ride: Ride; routeToPickup: (Pick<TrackingRoute, "phase" | "geometry" | "distanceMeters" | "durationSeconds" | "steps">) | null; routeToDestination: (Pick<TrackingRoute, "phase" | "geometry" | "distanceMeters" | "durationSeconds" | "steps">) | null }>(`/api/rides/${rideId}/navigation-package`, {
-        method: "POST", body: JSON.stringify(point),
+        method: "POST", body: JSON.stringify(point), signal: AbortSignal.timeout(12_000),
       }),
     reloadPassengerHistory: async () => {
       setPassengerHistoryLoading(true);

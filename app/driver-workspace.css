@@ -72,6 +72,24 @@
 .driver-nav-floats button, .driver-nav-floats a, .app-role-driver .driver-nav-center { display: grid; place-items: center; width: 43px; height: 43px; border: 1px solid #dbe5f1; border-radius: 50%; background: white; color: #071b42; box-shadow: 0 2px 8px #001c3a30; }
 .driver-nav-floats svg, .app-role-driver .driver-nav-center svg { width: 21px; height: 21px; }
 .driver-contact-cancel { display: block; width: 100%; min-height: 42px; margin-top: 13px; border: 1px solid #ec3939; border-radius: 10px; background: transparent; color: #ff6565; font-weight: 800; }
+/* These dialogs also open outside .driver-navigation, so they own their colors. */
+.driver-contact-overlay .driver-contact-sheet { color: #f9fbff; color-scheme: dark; }
+.driver-contact-overlay .driver-contact-sheet h2 { color: #f9fbff; line-height: 1.25; }
+.driver-cancel-sheet { max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overscroll-behavior: contain; }
+.driver-cancel-sheet .driver-cancel-reasons { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 12px 0 20px; }
+.driver-cancel-sheet .driver-cancel-reasons > label { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 10px 12px; border: 1px solid #526b87; border-radius: 10px; background: #10253d; color: #f9fbff; font-size: 15px; line-height: 1.35; cursor: pointer; }
+.driver-cancel-sheet .driver-cancel-reasons > label:has(input:checked) { border-color: #70b8ff; background: #123a67; box-shadow: inset 0 0 0 1px #70b8ff; }
+.driver-cancel-sheet .driver-cancel-reasons > label:has(input:disabled) { color: #adbed3; background: #0b1c30; cursor: not-allowed; }
+.driver-cancel-sheet .driver-cancel-reasons > label:focus-within { outline: 2px solid #a7d3ff; outline-offset: 2px; }
+.driver-cancel-sheet .driver-cancel-reasons input { flex: 0 0 20px; width: 20px; height: 20px; margin: 0; accent-color: #1688ff; }
+.driver-cancel-sheet .driver-cancel-other { display: grid; gap: 8px; margin: 12px 0 20px; color: #f9fbff; font-size: 15px; }
+.driver-cancel-sheet .driver-cancel-other textarea { width: 100%; min-height: 90px; padding: 12px; border-radius: 10px; border: 1px solid #7c91a9; background: #10253d; color: #fff; font: inherit; resize: vertical; }
+.driver-cancel-sheet .driver-cancel-other textarea:focus-visible { outline: 2px solid #a7d3ff; outline-offset: 2px; }
+.driver-contact-sheet .driver-contact-actions > button { flex: 1; min-width: 0; min-height: 48px; padding: 10px 12px; border: 1px solid #7c91a9; border-radius: 12px; background: #172b41; color: #fff; font-size: 15px; font-weight: 800; line-height: 1.3; cursor: pointer; }
+.driver-contact-sheet .driver-contact-actions > button:last-child { border-color: #3496ff; background: #0964df; }
+.driver-contact-sheet .driver-contact-actions > button:disabled { border-color: #47607d; background: #243b57; color: #c3cddd; cursor: not-allowed; }
+.driver-contact-sheet .driver-contact-actions > button:focus-visible { outline: 2px solid #a7d3ff; outline-offset: 2px; }
+.driver-cancel-sheet .driver-contact-actions { position: sticky; bottom: -1px; padding-block: 12px 0; background: #071525; box-shadow: 0 -8px 12px #071525; }
 .app-role-driver .driver-nav-center { right: max(12px, env(safe-area-inset-right)); bottom: calc(174px + env(safe-area-inset-bottom)); }
 .app-role-driver .driver-nav-center.is-following { border-color: #0867f7; color: #0867f7; }
 .app-role-driver .driver-nav-bottom { left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); padding: 16px 12px 12px; border: 1px solid #226bad; border-radius: 16px; background: #061b3b; box-shadow: 0 3px 14px #001d3c35; text-align: center; }

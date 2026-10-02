@@ -73,6 +73,7 @@ import { isInsideRegion, OFFLINE_REGION } from "@/lib/offline/region";
 import { clearOfflineRide, getOfflineRide, makeOfflineRide, queueOfflineTransition, savedRoute, saveOfflineRide, updateOfflineRide, type OfflineRidePackage, type OfflineEventType } from "@/lib/offline/ride-store";
 import { syncOfflineRide } from "@/lib/offline/ride-sync";
 import { selectDriverRide } from "@/lib/driver/ride-authority";
+import { shouldAcceptGpsFix } from "@/lib/tracking/driver-gps";
 import { PassengerCentral } from "@/components/passenger/passenger-central";
 import { loadSavedPlaces, persistSavedPlaces, type SavedPlace } from "@/lib/passenger/saved-places";
 import {
@@ -3550,6 +3551,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const [navSample, setNavSample] = useState<{ accuracy: number; speed: number | null; heading: number | null; timestamp: number }>();
   const previousGpsRef = useRef<LivePoint | null>(null);
   const lastGpsTimestampRef = useRef(0);
+  const currentGpsPositionRef = useRef<GeolocationPosition | null>(null);
   const [voiceOn, setVoiceOn] = useState(false);
   const announcedRef = useRef(new Set<string>());
   const offRouteSamplesRef = useRef(0);
@@ -3640,10 +3642,35 @@ function DriverPanel({ backend }: { backend: Backend }) {
       return () => window.clearTimeout(timer);
     }
     let lastSentSample: LocationSample | null = null;
+    let lastSentRideId: string | undefined;
     let sending = false;
+    let queuedPosition: GeolocationPosition | null = null;
     let disposed = false;
     let lastFixAt = Date.now();
     let fallbackPending = false;
+    let fallbackStartedAt = 0;
+    let permissionDenied = false;
+    let watcher: number | null = null;
+    let lastWatchStartAt = 0;
+    const uploadPosition = (position: GeolocationPosition) => {
+      const currentRideId = rideIdRef.current;
+      const sample: LocationSample = {
+        lat: position.coords.latitude, lng: position.coords.longitude,
+        accuracyMeters: position.coords.accuracy, timestamp: position.timestamp,
+      };
+      if (sending) { queuedPosition = position; return; }
+      if (lastSentRideId === currentRideId && !shouldSendLocationUpdate(lastSentSample, sample, Boolean(currentRideId))) return;
+      sending = true;
+      void updateLocation(position, currentRideId)
+        .then(() => { lastSentSample = sample; lastSentRideId = currentRideId; })
+        .catch(() => { /* Uma falha não impede a próxima tentativa. */ })
+        .finally(() => {
+          sending = false;
+          const queued = queuedPosition;
+          queuedPosition = null;
+          if (queued && !disposed) uploadPosition(queued);
+        });
+    };
     const handlePosition = (position: GeolocationPosition) => {
         if (disposed) return;
         if (
@@ -3658,6 +3685,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
         if (position.timestamp <= lastGpsTimestampRef.current) return;
         lastGpsTimestampRef.current = position.timestamp;
         lastFixAt = Date.now();
+        permissionDenied = false;
+        if (!shouldAcceptGpsFix(currentGpsPositionRef.current, position)) return;
+        currentGpsPositionRef.current = position;
         const nextPoint = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
@@ -3687,58 +3717,42 @@ function DriverPanel({ backend }: { backend: Backend }) {
             accuracy: position.coords.accuracy, timestamp: position.timestamp,
           } })).catch(() => undefined);
         }
-        const sample: LocationSample = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          accuracyMeters: position.coords.accuracy,
-          timestamp: position.timestamp,
-        };
-        if (
-          sending ||
-          !shouldSendLocationUpdate(lastSentSample, sample, Boolean(currentRideId))
-        ) {
-          return;
-        }
-        sending = true;
-        lastSentSample = sample;
-        void updateLocation(position, currentRideId)
-          .catch(() => { /* GPS local continua mesmo quando o servidor não responde. */ })
-          .finally(() => {
-            sending = false;
-          });
+        uploadPosition(position);
       };
     const handleError = (error: GeolocationPositionError) => {
       if (disposed) return;
+      if (error.code === 1) permissionDenied = true;
       setGpsStatus(error.code === 1
         ? "Permita o GPS para mostrar sua posição, estimar chegada e navegar."
         : error.code === 3
           ? "O GPS demorou para responder. Confira a localização do aparelho e tente novamente."
           : "GPS indisponível no momento; confira a localização do aparelho.");
     };
-    const watcher = navigator.geolocation.watchPosition(
-      handlePosition,
-      handleError,
-      {
-        enableHighAccuracy: true,
-        maximumAge: 3000,
-        timeout: 15000,
-      },
-    );
+    const startWatch = () => {
+      if (watcher !== null) navigator.geolocation.clearWatch(watcher);
+      lastWatchStartAt = Date.now();
+      watcher = navigator.geolocation.watchPosition(handlePosition, handleError,
+        { enableHighAccuracy: true, maximumAge: 3000, timeout: 15000 });
+    };
+    startWatch();
     const recover = () => {
-      if (document.hidden || manualGpsRetryRef.current || fallbackPending || Date.now() - lastFixAt < 10_000) return;
+      if (fallbackPending && Date.now() - fallbackStartedAt > 15_000) fallbackPending = false;
+      if (document.hidden || permissionDenied || manualGpsRetryRef.current || fallbackPending || Date.now() - lastFixAt < 8_000) return;
+      if (Date.now() - lastFixAt > 30_000 && Date.now() - lastWatchStartAt > 30_000) startWatch();
       fallbackPending = true;
+      fallbackStartedAt = Date.now();
       navigator.geolocation.getCurrentPosition(
         (position) => { fallbackPending = false; handlePosition(position); },
         (error) => { fallbackPending = false; handleError(error); },
-        { enableHighAccuracy: false, maximumAge: 5000, timeout: 12000 },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 10_000 },
       );
     };
     const recoveryTimer = window.setInterval(recover, 5000);
-    const foreground = () => { if (!document.hidden) recover(); };
+    const foreground = () => { if (!document.hidden) { permissionDenied = false; recover(); } };
     document.addEventListener("visibilitychange", foreground);
     return () => {
       disposed = true;
-      navigator.geolocation.clearWatch(watcher);
+      if (watcher !== null) navigator.geolocation.clearWatch(watcher);
       window.clearInterval(recoveryTimer);
       document.removeEventListener("visibilitychange", foreground);
     };
@@ -3761,11 +3775,13 @@ function DriverPanel({ backend }: { backend: Backend }) {
           finish();
           return;
         }
-        if (position.timestamp <= lastGpsTimestampRef.current) {
+        if (position.timestamp <= lastGpsTimestampRef.current ||
+          !shouldAcceptGpsFix(currentGpsPositionRef.current, position)) {
           finish();
           return;
         }
         lastGpsTimestampRef.current = position.timestamp;
+        currentGpsPositionRef.current = position;
         previousGpsRef.current = point;
         setLiveLocation(point);
         setNavSample({ accuracy: position.coords.accuracy, speed: position.coords.speed,
@@ -3933,10 +3949,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
     : navSample.accuracy > 80
       ? `GPS com precisão de ${Math.round(navSample.accuracy)} m. Aguarde uma posição mais precisa.`
       : gpsStatus;
-  const pickupNavigationReady = Boolean(ride?.status === "aceita" && liveLocation && !gpsWeak && navEta && navigationRoute.length > 1 &&
-    navigationTargetPoint && isValidCoordinates(liveLocation) && isValidCoordinates(navigationTargetPoint));
-  const arrivalReady = Boolean(ride?.status === "motorista_a_caminho" && liveLocation && !gpsWeak && navSample && navSample.accuracy <= 40 &&
-    navEta && navigationRoute.length > 1 && distanceToTarget <= backend.cancellationPolicy.arrival_radius_meters);
+  const arrivalReady = Boolean(ride?.status === "motorista_a_caminho" && liveLocation && navSample &&
+    navSample.accuracy <= 40 && distanceToTarget <= backend.cancellationPolicy.arrival_radius_meters);
   const navDestination = useMemo(() => targetLat !== undefined && targetLng !== undefined
     ? { lat: targetLat, lng: targetLng, label: navPhase === "pickup" ? "Passageiro" : "Destino" }
     : undefined, [targetLat, targetLng, navPhase]);
@@ -4194,11 +4208,13 @@ function DriverPanel({ backend }: { backend: Backend }) {
     if (!driverId) throw new Error("Sessão do motorista indisponível.");
     // Accepting a ride must not wait for a fresh GPS fix. The watch keeps trying;
     // the last known point is only a route preview, never a live GPS report.
-    const point = liveLocation && isValidCoordinates(liveLocation) ? liveLocation : null;
-    const freshPoint = point && navSample && Date.now() - navSample.timestamp < 15_000 && navSample.accuracy <= 80
-      ? point : null;
     const graph = roadGraph || await loadRegionPackage().catch(() => null);
     if (graph) setRoadGraph(graph);
+    const latestPosition = currentGpsPositionRef.current;
+    const point = latestPosition && isValidCoordinates({ lat: latestPosition.coords.latitude, lng: latestPosition.coords.longitude })
+      ? { lat: latestPosition.coords.latitude, lng: latestPosition.coords.longitude } : liveLocation && isValidCoordinates(liveLocation) ? liveLocation : null;
+    const freshPoint = latestPosition && Date.now() - latestPosition.timestamp < 15_000 && latestPosition.coords.accuracy <= 80
+      ? point : null;
     const prepared = freshPoint
       ? await backend.prepareNavigation(acceptedRide.id, { lat: freshPoint.lat, lng: freshPoint.lng }).catch(() => null)
       : null;
@@ -4230,6 +4246,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
     closeRideOfferNotification(offer.ride_id);
     try {
       await backend.acceptRide(offer.ride_id);
+      const currentPosition = currentGpsPositionRef.current;
+      if (currentPosition && Date.now() - currentPosition.timestamp < 30_000)
+        void backend.updateLocation(currentPosition, offer.ride_id).catch(() => undefined);
       await backend.refresh();
       try {
         await prepareNavigationForRide(offer.ride);
@@ -4344,14 +4363,6 @@ function DriverPanel({ backend }: { backend: Backend }) {
   async function advance() {
     if (!ride) return;
     if (offlineConflict) { setNotice(offlineConflict); return; }
-    if (ride.status === "aceita" && !pickupNavigationReady) {
-      setNotice("Aguarde uma posição atual do GPS e a rota até o passageiro antes de sair.");
-      return;
-    }
-    if (ride.status === "motorista_a_caminho" && !arrivalReady) {
-      setNotice("A chegada exige GPS recente com precisão de até 40 m, rota válida e proximidade do embarque.");
-      return;
-    }
     const next: Record<string, string> = {
       aceita: "motorista_a_caminho",
       motorista_a_caminho: "motorista_chegou",
@@ -4362,10 +4373,34 @@ function DriverPanel({ backend }: { backend: Backend }) {
     if (!status) return;
     setBusy(true);
     try {
+      let arrivalPosition: GeolocationPosition | null = null;
+      if (status === "motorista_chegou") {
+        arrivalPosition = await new Promise<GeolocationPosition>((resolve, reject) => {
+          if (!("geolocation" in navigator)) {
+            reject(new Error("Este aparelho não oferece acesso ao GPS."));
+            return;
+          }
+          navigator.geolocation.getCurrentPosition(resolve, (error) => reject(new Error(error.code === 1
+            ? "Permita o acesso à localização para confirmar a chegada."
+            : "O GPS não respondeu. Confira a localização do aparelho e tente novamente.")),
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 10_000 });
+        });
+        const pickup = { lat: ride.origin_lat, lng: ride.origin_lng };
+        const actual = { lat: arrivalPosition.coords.latitude, lng: arrivalPosition.coords.longitude };
+        if (Date.now() - arrivalPosition.timestamp > 30_000 || !Number.isFinite(arrivalPosition.coords.accuracy) || arrivalPosition.coords.accuracy > 40 ||
+          !isValidCoordinates(actual) || metersBetween(actual, pickup) > backend.cancellationPolicy.arrival_radius_meters)
+          throw new Error("GPS sem precisão suficiente ou fora do embarque. Tente novamente ao chegar.");
+        currentGpsPositionRef.current = arrivalPosition;
+        lastGpsTimestampRef.current = Math.max(lastGpsTimestampRef.current, arrivalPosition.timestamp);
+        setLiveLocation({ ...actual, label: "Sua localização" });
+        setNavSample({ accuracy: arrivalPosition.coords.accuracy, speed: arrivalPosition.coords.speed,
+          heading: arrivalPosition.coords.heading, timestamp: arrivalPosition.timestamp });
+      }
       const offlineType: OfflineEventType | null = status === "motorista_chegou" ? "ARRIVED_AT_PICKUP"
         : status === "em_corrida" ? "RIDE_STARTED" : status === "finalizada" ? "RIDE_COMPLETED" : null;
       if (connectivity !== "OFFLINE" && !pendingLocalStatus) {
         try {
+          if (arrivalPosition) await backend.updateLocation(arrivalPosition, ride.id);
           await backend.transitionRide(ride.id, status);
           await backend.refresh();
           if (offlinePackage?.ride.id === ride.id) {
@@ -4375,13 +4410,14 @@ function DriverPanel({ backend }: { backend: Backend }) {
           }
           return;
         } catch (error) {
-          if (error instanceof BackendApiError) throw error;
+          if (arrivalPosition || error instanceof BackendApiError) throw error;
         }
       }
       if (!offlineType || !offlinePackage || !offlinePackage.mapReady || !offlinePackage.routeToPickup || !offlinePackage.routeToDestination)
         throw new Error("Pacote offline incompleto. Aguarde a conexão antes de alterar esta corrida.");
       const updated = await queueOfflineTransition(ride.id, offlineType,
-        liveLocation && navSample && !gpsWeak ? { lat: liveLocation.lat, lng: liveLocation.lng } : null);
+        arrivalPosition ? { lat: arrivalPosition.coords.latitude, lng: arrivalPosition.coords.longitude }
+          : liveLocation && navSample && !gpsWeak ? { lat: liveLocation.lat, lng: liveLocation.lng } : null);
       if (!updated) throw new Error("Não foi possível salvar esta etapa no aparelho.");
       setOfflinePackage(updated);
       setNotice(status === "finalizada" ? "Corrida concluída neste aparelho. Sincronização pendente; pagamento ainda não confirmado."
@@ -4803,7 +4839,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
               {navPhase === "trip" && connectivity === "ONLINE" && Number(ride.tracked_distance_meters) > 0 && <div className="driver-nav-trip">Percorrido pelo GPS: {(Number(ride.tracked_distance_meters) / 1000).toFixed(2).replace(".", ",")} km</div>}
               <div className="driver-nav-actions">
                 <button type="button" className="driver-nav-primary"
-                  disabled={busy || (ride.status === "aceita" && !pickupNavigationReady) || (ride.status === "motorista_a_caminho" && !arrivalReady)}
+                  disabled={busy}
                   onClick={advance}>{ride.status === "aceita" ? "Ir até passageiro" : ride.status === "motorista_a_caminho" ? "Cheguei" : ride.status === "motorista_chegou" ? "Iniciar corrida" : "Finalizar corrida"}</button>
               </div>
               {ride.status !== "em_corrida" && <button type="button" className="driver-nav-fallback" disabled={busy} onClick={() => setCancelStep(1)}>Cancelar corrida</button>}
@@ -5046,7 +5082,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
                 </Button>
               )}
               {ride.status === "em_corrida" && <Button disabled={busy} variant="outline" onClick={() => setEarlyEndOpen(true)}>ENCERRAR ANTECIPADAMENTE</Button>}
-              <Button disabled={busy || (ride.status === "aceita" && !pickupNavigationReady) || (ride.status === "motorista_a_caminho" && !arrivalReady)} className="primary-cta" onClick={advance}>
+              <Button disabled={busy} className="primary-cta" onClick={advance}>
                 {ride.status === "aceita"
                   ? "IR ATÉ PASSAGEIRO"
                   : ride.status === "motorista_a_caminho"
