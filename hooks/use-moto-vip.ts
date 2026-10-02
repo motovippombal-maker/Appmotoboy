@@ -1199,7 +1199,7 @@ export function useMotoVip() {
     updateAdminCancellationPolicy: (policy: CancellationPolicy) => api<{ policy: CancellationPolicy }>("/api/admin/cancellation", {
       method: "POST", body: JSON.stringify(policy),
     }),
-    prepareNavigation: (rideId: string, point: { lat: number; lng: number; accuracyMeters?: number }) =>
+    prepareNavigation: (rideId: string, point?: { lat: number; lng: number; accuracyMeters?: number }) =>
       api<{ ride: Ride; routeToPickup: (Pick<TrackingRoute, "phase" | "geometry" | "distanceMeters" | "durationSeconds" | "steps">) | null; routeToDestination: (Pick<TrackingRoute, "phase" | "geometry" | "distanceMeters" | "durationSeconds" | "steps">) | null }>(`/api/rides/${rideId}/navigation-package`, {
         method: "POST", body: JSON.stringify(point), signal: AbortSignal.timeout(12_000),
       }),

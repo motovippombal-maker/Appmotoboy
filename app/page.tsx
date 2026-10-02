@@ -3642,6 +3642,28 @@ function DriverPanel({ backend }: { backend: Backend }) {
       );
       return () => window.clearTimeout(timer);
     }
+    let permissionStatus: PermissionStatus | null = null;
+    let permissionCheckActive = true;
+    const reportPermission = (status: PermissionStatus) => {
+      if (permissionCheckActive && status.state === "denied") {
+        permissionDenied = true;
+        setGpsStatus("Localização bloqueada neste site. Toque no ícone ao lado do endereço e permita a localização.");
+      }
+    };
+    const onPermissionChange = () => {
+      if (!permissionStatus || !permissionCheckActive) return;
+      reportPermission(permissionStatus);
+      if (permissionStatus.state !== "denied") {
+        permissionDenied = false;
+        startWatch();
+      }
+    };
+    void navigator.permissions?.query({ name: "geolocation" }).then((status) => {
+      if (!permissionCheckActive) return;
+      permissionStatus = status;
+      reportPermission(status);
+      status.addEventListener("change", onPermissionChange);
+    }).catch(() => undefined);
     let lastSentSample: LocationSample | null = null;
     let lastSentRideId: string | undefined;
     let sending = false;
@@ -3723,8 +3745,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
     const handleError = (error: GeolocationPositionError) => {
       if (disposed) return;
       if (error.code === 1) permissionDenied = true;
-      setGpsStatus(error.code === 1
-        ? "Permita o GPS para mostrar sua posição, estimar chegada e navegar."
+      setGpsStatus(error.code === 1 || permissionDenied
+        ? "Localização bloqueada neste site. Toque no ícone ao lado do endereço e permita a localização."
         : error.code === 3
           ? "O GPS demorou para responder. Confira a localização do aparelho e tente novamente."
           : "GPS indisponível no momento; confira a localização do aparelho.");
@@ -3737,15 +3759,25 @@ function DriverPanel({ backend }: { backend: Backend }) {
     };
     startWatch();
     const recover = () => {
-      if (fallbackPending && Date.now() - fallbackStartedAt > 15_000) fallbackPending = false;
+      if (fallbackPending && Date.now() - fallbackStartedAt > 25_000) fallbackPending = false;
       if (document.hidden || permissionDenied || manualGpsRetryRef.current || fallbackPending || Date.now() - lastFixAt < 8_000) return;
       if (Date.now() - lastFixAt > 30_000 && Date.now() - lastWatchStartAt > 30_000) startWatch();
       fallbackPending = true;
       fallbackStartedAt = Date.now();
       navigator.geolocation.getCurrentPosition(
         (position) => { fallbackPending = false; handlePosition(position); },
-        (error) => { fallbackPending = false; handleError(error); },
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 10_000 },
+        (error) => {
+          if (error.code === 1) { fallbackPending = false; handleError(error); return; }
+          // A network-based fix can keep the map usable while the device's
+          // high-accuracy provider is unavailable. Arrival still needs a new
+          // precise fix and is checked separately.
+          navigator.geolocation.getCurrentPosition(
+            (position) => { fallbackPending = false; handlePosition(position); },
+            (fallbackError) => { fallbackPending = false; handleError(fallbackError); },
+            { enableHighAccuracy: false, maximumAge: 10_000, timeout: 12_000 },
+          );
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 8_000 },
       );
     };
     const recoveryTimer = window.setInterval(recover, 5000);
@@ -3753,6 +3785,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
     document.addEventListener("visibilitychange", foreground);
     return () => {
       disposed = true;
+      permissionCheckActive = false;
+      permissionStatus?.removeEventListener("change", onPermissionChange);
       if (watcher !== null) navigator.geolocation.clearWatch(watcher);
       window.clearInterval(recoveryTimer);
       document.removeEventListener("visibilitychange", foreground);
@@ -3945,7 +3979,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const gpsWeak = !navSample || navClock - navSample.timestamp > 15_000 || navSample.accuracy > 80;
   const gpsAlert = !navSample || navClock - navSample.timestamp > 15_000
     ? gpsStatus === "GPS aguardando" || gpsStatus.startsWith("GPS ativo")
-      ? "Aguardando nova posição do GPS. Tentando recuperar automaticamente."
+      ? navSample && navSample.accuracy > 500
+        ? `Última localização imprecisa (${Math.round(navSample.accuracy)} m). Tentando obter uma posição melhor.`
+        : "Aguardando nova posição do GPS. Tentando recuperar automaticamente."
       : gpsStatus
     : navSample.accuracy > 80
       ? `GPS com precisão de ${Math.round(navSample.accuracy)} m. Aguarde uma posição mais precisa.`
@@ -4212,15 +4248,21 @@ function DriverPanel({ backend }: { backend: Backend }) {
     const graph = roadGraph || await loadRegionPackage().catch(() => null);
     if (graph) setRoadGraph(graph);
     const latestPosition = currentGpsPositionRef.current;
-    const recentPosition = latestPosition && Date.now() - latestPosition.timestamp < 120_000 ? latestPosition : null;
+    // A previous fix is useful for a clearly labelled route preview. It is
+    // never treated as a live position or used to confirm arrival.
+    const recentPosition = latestPosition && Date.now() - latestPosition.timestamp < 15 * 60_000
+      && Number.isFinite(latestPosition.coords.accuracy) && latestPosition.coords.accuracy <= 500
+      ? latestPosition : null;
     const point = recentPosition && isValidCoordinates({ lat: recentPosition.coords.latitude, lng: recentPosition.coords.longitude })
       ? { lat: recentPosition.coords.latitude, lng: recentPosition.coords.longitude }
-      : liveLocation && navSample && Date.now() - navSample.timestamp < 120_000 && isValidCoordinates(liveLocation) ? liveLocation : null;
+      : offlinePackage?.lastKnownPosition && Date.now() - offlinePackage.lastKnownPosition.timestamp < 15 * 60_000
+        && offlinePackage.lastKnownPosition.accuracy <= 500
+        && isValidCoordinates(offlinePackage.lastKnownPosition)
+        ? offlinePackage.lastKnownPosition : null;
     const freshPoint = point && latestPosition && Date.now() - latestPosition.timestamp < 15_000 && latestPosition.coords.accuracy <= 80
       ? point : null;
-    const prepared = point
-      ? await backend.prepareNavigation(acceptedRide.id, { lat: point.lat, lng: point.lng }).catch(() => null)
-      : null;
+    const prepared = await backend.prepareNavigation(acceptedRide.id,
+      point ? { lat: point.lat, lng: point.lng } : undefined).catch(() => null);
     const baseRide = { ...(prepared?.ride || acceptedRide), driver_id: driverId, status: "aceita" };
     const pickupPoint = { lat: baseRide.origin_lat, lng: baseRide.origin_lng };
     const destinationPoint = { lat: baseRide.destination_lat, lng: baseRide.destination_lng };
@@ -4234,7 +4276,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
     await saveOfflineRide(data);
     setOfflinePackage(data);
     if (!freshPoint) {
-      setNotice("Corrida aceita. O aparelho ainda não forneceu GPS atual; o mapa mostra apenas uma prévia da rota.");
+      setNotice(pickup
+        ? "Corrida aceita. Rota de referência salva; aguardando GPS atual para acompanhar o deslocamento."
+        : "Corrida aceita. Sem posição recente e confiável para traçar a ida ao passageiro; confira a permissão de localização ou abra a rota em outro mapa.");
     } else if ((!pickup || !trip || !mapReady) && !navigator.onLine) {
       setNotice("Corrida aceita. O pacote offline ainda não cobre toda esta rota; mantenha a conexão para navegar com segurança.");
     }
@@ -4810,10 +4854,10 @@ function DriverPanel({ backend }: { backend: Backend }) {
                 <button type="button" className="driver-nav-exit" onClick={() => { setDriverView("menu"); setMenuOpen(true); }} aria-label="Abrir menu do motorista"><Menu /></button>
               </div>
               <div className="driver-nav-instruction">
-                <span className="driver-nav-arrow" aria-hidden="true">{maneuverSymbol(upcomingManeuver?.step)}</span>
+                <span className="driver-nav-arrow" aria-hidden="true">{maneuverSymbol(gpsWeak ? undefined : upcomingManeuver?.step)}</span>
                 <div>
-                  <strong>{ride.status === "motorista_chegou" ? "Você chegou" : !gpsWeak && distanceToTarget <= 45 ? "Local de chegada próximo" : upcomingManeuver ? `Em ${formatNavDistance(upcomingManeuver.distanceMeters)}` : "Siga pela rota"}</strong>
-                  <span>{ride.status === "motorista_chegou" ? "Aguarde o embarque" : upcomingManeuver ? maneuverText(upcomingManeuver.step) : navPhase === "pickup" ? ride.origin_address : ride.destination_address}</span>
+                  <strong>{ride.status === "motorista_chegou" ? "Você chegou" : gpsWeak ? navEta ? "Rota de referência" : "Aguardando localização" : distanceToTarget <= 45 ? "Local de chegada próximo" : upcomingManeuver ? `Em ${formatNavDistance(upcomingManeuver.distanceMeters)}` : "Siga pela rota"}</strong>
+                  <span>{ride.status === "motorista_chegou" ? "Aguarde o embarque" : !gpsWeak && upcomingManeuver ? maneuverText(upcomingManeuver.step) : navPhase === "pickup" ? ride.origin_address : ride.destination_address}</span>
                 </div>
                 <button type="button" className="driver-nav-sound" aria-label={voiceOn ? "Desligar som" : "Ligar som"} aria-pressed={voiceOn} onClick={() => {
                   if (voiceOn) window.speechSynthesis?.cancel();
@@ -4837,8 +4881,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
             }}><Crosshair /></button>
             <div className="driver-nav-bottom">
               <div className="driver-nav-summary">
-                <strong>{navEta ? `${minutes(Math.round(navEta.durationSeconds * Math.min(1, (navigationProgress?.remainingMeters ?? navEta.distanceMeters) / Math.max(1, navEta.distanceMeters))))} min` : gpsWeak ? "Obtendo localização…" : "Calculando…"}</strong>
-                <span>{navEta ? formatNavDistance(navigationProgress?.remainingMeters ?? navEta.distanceMeters) : gpsWeak ? gpsAlert : trackingEtaError || "Calculando rota…"}</span>
+                <strong>{gpsWeak ? navEta ? "Rota de referência" : "Obtendo localização…" : navEta ? `${minutes(Math.round(navEta.durationSeconds * Math.min(1, (navigationProgress?.remainingMeters ?? navEta.distanceMeters) / Math.max(1, navEta.distanceMeters))))} min` : "Calculando…"}</strong>
+                <span>{gpsWeak ? navEta ? `${formatNavDistance(navEta.distanceMeters)} desde a última posição conhecida; aguarde GPS atual.` : gpsAlert : navEta ? formatNavDistance(navigationProgress?.remainingMeters ?? navEta.distanceMeters) : trackingEtaError || "Calculando rota…"}</span>
                 <span>{ride.status === "aceita" ? "Corrida aceita · preparando rota" : ride.status === "motorista_chegou" ? "Aguardando passageiro" : navPhase === "pickup" ? "Indo buscar o passageiro" : "Em corrida para o destino"}</span>
               </div>
               {navPhase === "trip" && connectivity === "ONLINE" && Number(ride.tracked_distance_meters) > 0 && <div className="driver-nav-trip">Percorrido pelo GPS: {(Number(ride.tracked_distance_meters) / 1000).toFixed(2).replace(".", ",")} km</div>}
