@@ -4766,6 +4766,13 @@ summary:focus-visible,
   font-family: inherit;
   background: #e8edf2;
 }
+/* Tailwind's responsive img rule must not shrink Leaflet's 256px tiles
+   against the zero-width tile container. The images had loaded but rendered
+   at 0px wide, leaving the driver with a gray map after accepting a ride. */
+.leaflet-container img.leaflet-tile {
+  max-width: none !important;
+  max-height: none !important;
+}
 .leaflet-control-attribution {
   font-size: 10px !important;
 }
