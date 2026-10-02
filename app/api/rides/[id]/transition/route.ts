@@ -3,6 +3,7 @@ import { ApiError, audit, consumeRateLimit, jsonError, requireUser } from "@/lib
 import { distanceKm } from "@/lib/backend/routing";
 import { parseCancellationPolicy } from "@/lib/backend/cancellation-policy";
 import { dispatchPushQueue } from "@/lib/backend/push";
+import { hasPreciseAccuracy } from "@/lib/location/driver-location-input";
 
 const schema = z.object({ status: z.enum(["motorista_a_caminho", "motorista_chegou", "em_corrida", "finalizada", "cancelada"]), reason: z.string().max(300).optional(),
   reasonCode: z.enum(["mechanical", "personal", "cannot_reach", "unsafe", "passenger_requested", "address", "other"]).optional(),
@@ -109,7 +110,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           .select("ride_id,latitude,longitude,accuracy_meters,updated_at")
           .eq("driver_id", ride.driver_id).maybeSingle();
         if (locationError) throw locationError;
-        if (!location || location.ride_id !== id || Number(location.accuracy_meters) > 40 ||
+        if (!location || location.ride_id !== id || !hasPreciseAccuracy(location.accuracy_meters) ||
           Date.parse(location.updated_at) < Date.now() - 30_000 ||
           distanceKm({ lat: location.latitude, lng: location.longitude }, pickup) * 1000 > policy.arrival_radius_meters)
           throw new ApiError(409, "Aguardando GPS preciso perto do embarque para confirmar chegada.", "OUTSIDE_PICKUP_GEOFENCE");

@@ -12,7 +12,7 @@
     "build:vercel": "npm run check:vercel-env && node scripts/stamp-service-worker.mjs && next build",
     "test:rides": "node --test tests/ride-lifecycle.integration.mjs",
     "test:pricing": "tsx --test tests/pricing-service-area.test.ts",
-    "test:location": "tsx --test tests/location-map-address.test.ts",
+    "test:location": "tsx --test tests/location-map-address.test.ts tests/driver-location-input.test.ts",
     "test:tracking": "tsx --test tests/realtime-tracking.test.ts",
     "test:driver": "tsx --test tests/driver-navigation.test.ts tests/driver-alert.test.ts tests/driver-gps.test.ts",
     "test:offline": "tsx --test tests/offline-navigation.test.ts",

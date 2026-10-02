@@ -1,9 +1,8 @@
-import { z } from "zod";
 import { ApiError, consumeRateLimit, jsonError, requireUser } from "@/lib/backend/api";
 import { distanceKm } from "@/lib/backend/routing";
 import { driverLocationRpcArgs } from "@/lib/backend/driver-location-rpc";
+import { driverLocationInputSchema } from "@/lib/location/driver-location-input";
 
-const schema = z.object({ latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180), accuracyMeters: z.number().finite().nonnegative().max(10000).optional(), heading: z.number().finite().min(0).max(360).optional(), speedMps: z.number().finite().nonnegative().max(100).optional(), rideId: z.string().uuid().optional(), recordedAt: z.string().datetime().optional() });
 
 export async function POST(request: Request) {
   try {
@@ -11,7 +10,13 @@ export async function POST(request: Request) {
     // Um motorista pode manter a corrida aberta em mais de uma aba/aparelho.
     // O limite anterior (20/min) rejeitava posições válidas durante a navegação.
     await consumeRateLimit(supabase, `location:${user.id}`, profile.role === "driver" ? 90 : 30, 60);
-    const input = schema.parse(await request.json());
+    const parsed = driverLocationInputSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      const fields = [...new Set(parsed.error.issues.map((issue) => issue.path.join(".") || "body"))];
+      console.warn("[LOCATION_INPUT_INVALID]", fields.join(","));
+      throw new ApiError(400, "O aparelho enviou uma posição inválida.", "INVALID_LOCATION_INPUT", { fields });
+    }
+    const input = parsed.data;
     if (profile.blocked && !input.rideId) throw new ApiError(403, "Conta bloqueada.", "ACCOUNT_BLOCKED");
     let rideStatus: string | null = null;
     if (input.rideId) {

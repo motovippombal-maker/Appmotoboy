@@ -3560,6 +3560,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const [rerouting, setRerouting] = useState(false);
   const [navClock, setNavClock] = useState(0);
   const [gpsStatus, setGpsStatus] = useState("GPS aguardando");
+  const [locationSyncError, setLocationSyncError] = useState("");
   const [gpsRetrying, setGpsRetrying] = useState(false);
   const manualGpsRetryRef = useRef(false);
   const [trackingEta, setTrackingEta] = useState<TrackingRoute | null>(null);
@@ -3662,8 +3663,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
       if (lastSentRideId === currentRideId && !shouldSendLocationUpdate(lastSentSample, sample, Boolean(currentRideId))) return;
       sending = true;
       void updateLocation(position, currentRideId)
-        .then(() => { lastSentSample = sample; lastSentRideId = currentRideId; })
-        .catch(() => { /* Uma falha não impede a próxima tentativa. */ })
+        .then(() => { lastSentSample = sample; lastSentRideId = currentRideId; setLocationSyncError(""); })
+        .catch(() => { setLocationSyncError("Posição recebida no aparelho, mas ainda não enviada. Tentando novamente."); })
         .finally(() => {
           sending = false;
           const queued = queuedPosition;
@@ -4211,12 +4212,14 @@ function DriverPanel({ backend }: { backend: Backend }) {
     const graph = roadGraph || await loadRegionPackage().catch(() => null);
     if (graph) setRoadGraph(graph);
     const latestPosition = currentGpsPositionRef.current;
-    const point = latestPosition && isValidCoordinates({ lat: latestPosition.coords.latitude, lng: latestPosition.coords.longitude })
-      ? { lat: latestPosition.coords.latitude, lng: latestPosition.coords.longitude } : liveLocation && isValidCoordinates(liveLocation) ? liveLocation : null;
-    const freshPoint = latestPosition && Date.now() - latestPosition.timestamp < 15_000 && latestPosition.coords.accuracy <= 80
+    const recentPosition = latestPosition && Date.now() - latestPosition.timestamp < 120_000 ? latestPosition : null;
+    const point = recentPosition && isValidCoordinates({ lat: recentPosition.coords.latitude, lng: recentPosition.coords.longitude })
+      ? { lat: recentPosition.coords.latitude, lng: recentPosition.coords.longitude }
+      : liveLocation && navSample && Date.now() - navSample.timestamp < 120_000 && isValidCoordinates(liveLocation) ? liveLocation : null;
+    const freshPoint = point && latestPosition && Date.now() - latestPosition.timestamp < 15_000 && latestPosition.coords.accuracy <= 80
       ? point : null;
-    const prepared = freshPoint
-      ? await backend.prepareNavigation(acceptedRide.id, { lat: freshPoint.lat, lng: freshPoint.lng }).catch(() => null)
+    const prepared = point
+      ? await backend.prepareNavigation(acceptedRide.id, { lat: point.lat, lng: point.lng }).catch(() => null)
       : null;
     const baseRide = { ...(prepared?.ride || acceptedRide), driver_id: driverId, status: "aceita" };
     const pickupPoint = { lat: baseRide.origin_lat, lng: baseRide.origin_lng };
@@ -4227,8 +4230,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
     const mapReady = Boolean(freshPoint && graph && [freshPoint, pickupPoint, destinationPoint].every((item) => isInsideRegion(item.lat, item.lng)));
     const data = makeOfflineRide(baseRide, driverId, pickup, trip, mapReady);
     const confirmed = await backend.getRideSnapshot().catch(() => null);
-    if (confirmed && confirmed.ride?.id !== acceptedRide.id)
-      throw new Error("A corrida foi encerrada antes de iniciar a navegação.");
+    if (confirmed && confirmed.ride?.id !== acceptedRide.id) return false;
     await saveOfflineRide(data);
     setOfflinePackage(data);
     if (!freshPoint) {
@@ -4240,27 +4242,30 @@ function DriverPanel({ backend }: { backend: Backend }) {
   }
   async function accept() {
     if (!offer) return;
+    const acceptedOffer = offer;
     setBusy(true);
     setNotice("");
     alertControllerRef.current?.stop();
-    closeRideOfferNotification(offer.ride_id);
+    closeRideOfferNotification(acceptedOffer.ride_id);
+    let accepted = false;
     try {
-      await backend.acceptRide(offer.ride_id);
+      await backend.acceptRide(acceptedOffer.ride_id);
+      accepted = true;
       const currentPosition = currentGpsPositionRef.current;
       if (currentPosition && Date.now() - currentPosition.timestamp < 30_000)
-        void backend.updateLocation(currentPosition, offer.ride_id).catch(() => undefined);
-      await backend.refresh();
-      try {
-        await prepareNavigationForRide(offer.ride);
-      } catch (error) {
-        setNotice(error instanceof Error ? `Corrida aceita. ${error.message}` : "Corrida aceita. Navegação offline indisponível neste momento.");
-      }
+        void backend.updateLocation(currentPosition, acceptedOffer.ride_id).catch(() => undefined);
       setGpsExpanded(true);
       setFollowDriver(true);
       await backend.refresh();
+      void prepareNavigationForRide(acceptedOffer.ride).catch(() => {
+        if (rideIdRef.current === acceptedOffer.ride_id)
+          setNotice("Corrida aceita. Não foi possível salvar o mapa offline agora; a navegação online continua disponível.");
+      });
     } catch (error) {
       setNotice(
-        error instanceof Error ? error.message : "Corrida indisponível.",
+        accepted
+          ? "Corrida aceita. Atualizando a tela; confira a corrida em andamento."
+          : error instanceof Error ? error.message : "Corrida indisponível.",
       );
       await backend.refresh().catch(() => undefined);
     } finally {
@@ -4816,8 +4821,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
                   setVoiceOn(!voiceOn);
                 }}>{voiceOn ? <Volume2 /> : <VolumeX />}</button>
               </div>
-              {(gpsWeak || rerouting || trackingEtaError) && <div className="driver-nav-alert" role="status">
-                <span>{rerouting ? "Recalculando rota…" : gpsWeak ? gpsAlert : trackingEtaError}</span>
+              {(gpsWeak || rerouting || trackingEtaError || locationSyncError) && <div className="driver-nav-alert" role="status">
+                <span>{rerouting ? "Recalculando rota…" : gpsWeak ? gpsAlert : locationSyncError || trackingEtaError}</span>
                 {gpsWeak && <button type="button" onClick={retryGps} disabled={gpsRetrying}>{gpsRetrying ? "Buscando GPS…" : "Tentar GPS"}</button>}
               </div>}
             </div>
