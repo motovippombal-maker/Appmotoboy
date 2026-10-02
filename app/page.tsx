@@ -3442,6 +3442,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
     return () => { active = false; };
   }, [driverId]);
   useEffect(() => {
+    if (backend.activeRide) setNotice((current) => current === "Corrida encerrada no servidor." ? "" : current);
+  }, [backend.activeRide?.id]);
+  useEffect(() => {
     if (!offlinePackage || busy ||
       (backend.cancelledRide?.id !== offlinePackage.ride.id && (!backend.rideSnapshotVerified || connectivity === "OFFLINE"))) return;
     if (backend.activeRide?.id === offlinePackage.ride.id) return;
@@ -3453,10 +3456,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
     }
     const cancelledByPassenger = backend.cancelledRide?.id === offlinePackage.ride.id
       && backend.cancelledRide.cancelled_by === offlinePackage.ride.passenger_id;
-    setNotice(cancelledByPassenger
-      ? `Corrida cancelada pelo passageiro.${backend.cancelledRide?.cancellation_fee_cents
-        ? ` Taxa avaliada: ${money(backend.cancelledRide.cancellation_fee_cents)}.` : ""}`
-      : "Corrida encerrada no servidor.");
+    if (cancelledByPassenger) setNotice(`Corrida cancelada pelo passageiro.${backend.cancelledRide?.cancellation_fee_cents
+      ? ` Taxa avaliada: ${money(backend.cancelledRide.cancellation_fee_cents)}.` : ""}`);
     void clearOfflineRide(obsoleteRideId).then(() => setOfflinePackage((current) =>
       current?.ride.id === obsoleteRideId ? null : current)).catch(() => undefined);
     void backendRef.current.refreshDriverQueue();
