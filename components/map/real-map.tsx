@@ -133,6 +133,15 @@ export function RealMap({
     onNavigationInteractionRef.current = onNavigationInteraction;
   }, [onNavigationInteraction]);
 
+  // Leaflet adds its own classes to this element. Keep React's className
+  // constant so a navigation state change cannot remove leaflet-container.
+  const picking = Boolean(onPick);
+  const navigating = Boolean(navigation);
+  useEffect(() => {
+    elementRef.current?.classList.toggle("is-picking", picking);
+    elementRef.current?.classList.toggle("is-navigating", navigating);
+  }, [picking, navigating]);
+
   useEffect(() => {
     if (!elementRef.current || mapRef.current) return;
     let disposed = false;
@@ -586,7 +595,7 @@ export function RealMap({
   return (
     <div
       ref={elementRef}
-      className={`real-map ${onPick ? "is-picking" : ""} ${navigation ? "is-navigating" : ""}`}
+      className="real-map leaflet-container"
       aria-label={onPick ? "Mapa para selecionar um endereço" : "Mapa OpenStreetMap da corrida"}
     />
   );
