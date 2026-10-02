@@ -3351,6 +3351,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const offer = backend.offers[0];
   const online = Boolean(state?.online);
   const hasActiveRide = Boolean(ride);
+  const trackingGps = online || hasActiveRide;
   useEffect(() => {
     connectivityManager.start();
     return () => connectivityManager.stop();
@@ -3497,6 +3498,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const [liveLocation, setLiveLocation] = useState<LivePoint>();
   const [navSample, setNavSample] = useState<{ accuracy: number; speed: number | null; heading: number | null; timestamp: number }>();
   const previousGpsRef = useRef<LivePoint | null>(null);
+  const lastGpsTimestampRef = useRef(0);
   const [voiceOn, setVoiceOn] = useState(false);
   const announcedRef = useRef(new Set<string>());
   const offRouteSamplesRef = useRef(0);
@@ -3506,6 +3508,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const [navClock, setNavClock] = useState(0);
   const [gpsStatus, setGpsStatus] = useState("GPS aguardando");
   const [gpsRetrying, setGpsRetrying] = useState(false);
+  const manualGpsRetryRef = useRef(false);
   const [trackingEta, setTrackingEta] = useState<TrackingRoute | null>(null);
   const [trackingEtaError, setTrackingEtaError] = useState("");
   const etaCalculationRef = useRef<EtaCalculation | null>(null);
@@ -3577,7 +3580,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
     return () => { active = false; };
   }, [online, rideId]);
   useEffect(() => {
-    if (!online && !rideIdRef.current) return;
+    if (!trackingGps) return;
     if (!("geolocation" in navigator)) {
       const timer = window.setTimeout(
         () => setGpsStatus("Este aparelho não oferece acesso ao GPS."),
@@ -3587,8 +3590,11 @@ function DriverPanel({ backend }: { backend: Backend }) {
     }
     let lastSentSample: LocationSample | null = null;
     let sending = false;
-    const watcher = navigator.geolocation.watchPosition(
-      (position) => {
+    let disposed = false;
+    let lastFixAt = Date.now();
+    let fallbackPending = false;
+    const handlePosition = (position: GeolocationPosition) => {
+        if (disposed) return;
         if (
           !isValidCoordinates({
             lat: position.coords.latitude,
@@ -3598,6 +3604,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
           setGpsStatus("O GPS retornou coordenadas inválidas.");
           return;
         }
+        if (position.timestamp <= lastGpsTimestampRef.current) return;
+        lastGpsTimestampRef.current = position.timestamp;
+        lastFixAt = Date.now();
         const nextPoint = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
@@ -3646,34 +3655,66 @@ function DriverPanel({ backend }: { backend: Backend }) {
           .finally(() => {
             sending = false;
           });
-      },
-      (error) => setGpsStatus(error.code === 1
+      };
+    const handleError = (error: GeolocationPositionError) => {
+      if (disposed) return;
+      setGpsStatus(error.code === 1
         ? "Permita o GPS para mostrar sua posição, estimar chegada e navegar."
         : error.code === 3
           ? "O GPS demorou para responder. Confira a localização do aparelho e tente novamente."
-          : "GPS indisponível no momento; confira a localização do aparelho."),
+          : "GPS indisponível no momento; confira a localização do aparelho.");
+    };
+    const watcher = navigator.geolocation.watchPosition(
+      handlePosition,
+      handleError,
       {
         enableHighAccuracy: true,
         maximumAge: 3000,
         timeout: 15000,
       },
     );
-    return () => navigator.geolocation.clearWatch(watcher);
-  }, [online, updateLocation]);
+    const recover = () => {
+      if (document.hidden || manualGpsRetryRef.current || fallbackPending || Date.now() - lastFixAt < 10_000) return;
+      fallbackPending = true;
+      navigator.geolocation.getCurrentPosition(
+        (position) => { fallbackPending = false; handlePosition(position); },
+        (error) => { fallbackPending = false; handleError(error); },
+        { enableHighAccuracy: false, maximumAge: 5000, timeout: 12000 },
+      );
+    };
+    const recoveryTimer = window.setInterval(recover, 5000);
+    const foreground = () => { if (!document.hidden) recover(); };
+    document.addEventListener("visibilitychange", foreground);
+    return () => {
+      disposed = true;
+      navigator.geolocation.clearWatch(watcher);
+      window.clearInterval(recoveryTimer);
+      document.removeEventListener("visibilitychange", foreground);
+    };
+  }, [trackingGps, updateLocation]);
   const retryGps = () => {
     if (!("geolocation" in navigator)) {
       setGpsStatus("Este aparelho não oferece acesso ao GPS.");
       return;
     }
+    manualGpsRetryRef.current = true;
     setGpsRetrying(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
+    const finish = () => {
+      manualGpsRetryRef.current = false;
+      setGpsRetrying(false);
+    };
+    const acceptPosition = (position: GeolocationPosition) => {
         const point = { lat: position.coords.latitude, lng: position.coords.longitude, label: "Sua localização" };
         if (!isValidCoordinates(point)) {
           setGpsStatus("O GPS retornou coordenadas inválidas.");
-          setGpsRetrying(false);
+          finish();
           return;
         }
+        if (position.timestamp <= lastGpsTimestampRef.current) {
+          finish();
+          return;
+        }
+        lastGpsTimestampRef.current = position.timestamp;
         previousGpsRef.current = point;
         setLiveLocation(point);
         setNavSample({ accuracy: position.coords.accuracy, speed: position.coords.speed,
@@ -3686,17 +3727,25 @@ function DriverPanel({ backend }: { backend: Backend }) {
           } })).catch(() => undefined);
         }
         void updateLocation(position, currentRideId).catch(() => undefined);
-        setGpsRetrying(false);
-      },
-      (error) => {
+        finish();
+      };
+    const fail = (error: GeolocationPositionError) => {
         setGpsStatus(error.code === 1
           ? "Permita a localização nas configurações do navegador para navegar."
           : error.code === 3
             ? "O GPS demorou para responder. Confira a localização do aparelho e tente novamente."
             : "GPS indisponível no momento; confira a localização do aparelho.");
-        setGpsRetrying(false);
+        finish();
+      };
+    navigator.geolocation.getCurrentPosition(
+      acceptPosition,
+      (error) => {
+        if (error.code === 1) { fail(error); return; }
+        setGpsStatus("GPS de alta precisão demorou; tentando localização pela rede.");
+        navigator.geolocation.getCurrentPosition(acceptPosition, fail,
+          { enableHighAccuracy: false, maximumAge: 10_000, timeout: 12_000 });
       },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 8_000 },
     );
   };
   useEffect(() => {
@@ -3826,12 +3875,16 @@ function DriverPanel({ backend }: { backend: Backend }) {
     ? Math.max(0, backend.cancellationPolicy.no_show_seconds - Math.floor((navClock - Date.parse(ride.arrival_server_at)) / 1000))
     : null;
   const gpsWeak = !navSample || navClock - navSample.timestamp > 15_000 || navSample.accuracy > 80;
-  const gpsAlert = gpsStatus === "GPS aguardando" || gpsStatus.startsWith("GPS ativo")
-    ? "Aguardando uma posição recente do GPS. Confira a permissão de localização."
-    : gpsStatus;
+  const gpsAlert = !navSample || navClock - navSample.timestamp > 15_000
+    ? gpsStatus === "GPS aguardando" || gpsStatus.startsWith("GPS ativo")
+      ? "Aguardando nova posição do GPS. Tentando recuperar automaticamente."
+      : gpsStatus
+    : navSample.accuracy > 80
+      ? `GPS com precisão de ${Math.round(navSample.accuracy)} m. Aguarde uma posição mais precisa.`
+      : gpsStatus;
   const pickupNavigationReady = Boolean(ride?.status === "aceita" && liveLocation && !gpsWeak && navEta && navigationRoute.length > 1 &&
     navigationTargetPoint && isValidCoordinates(liveLocation) && isValidCoordinates(navigationTargetPoint));
-  const arrivalReady = Boolean(ride?.status === "motorista_a_caminho" && liveLocation && !gpsWeak &&
+  const arrivalReady = Boolean(ride?.status === "motorista_a_caminho" && liveLocation && !gpsWeak && navSample && navSample.accuracy <= 40 &&
     navEta && navigationRoute.length > 1 && distanceToTarget <= backend.cancellationPolicy.arrival_radius_meters);
   const navDestination = useMemo(() => targetLat !== undefined && targetLng !== undefined
     ? { lat: targetLat, lng: targetLng, label: navPhase === "pickup" ? "Passageiro" : "Destino" }
@@ -4191,7 +4244,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
       return;
     }
     if (ride.status === "motorista_a_caminho" && !arrivalReady) {
-      setNotice("A chegada exige GPS atual, rota válida e proximidade do embarque.");
+      setNotice("A chegada exige GPS recente com precisão de até 40 m, rota válida e proximidade do embarque.");
       return;
     }
     const next: Record<string, string> = {
@@ -4650,10 +4703,12 @@ function DriverPanel({ backend }: { backend: Backend }) {
               </div>
               {ride.status === "motorista_a_caminho" && distanceToTarget > backend.cancellationPolicy.arrival_radius_meters &&
                 <p className="driver-nav-notice">Chegue a até {backend.cancellationPolicy.arrival_radius_meters} m do embarque para confirmar.</p>}
+              {ride.status === "motorista_a_caminho" && distanceToTarget <= backend.cancellationPolicy.arrival_radius_meters && !arrivalReady &&
+                <p className="driver-nav-notice">Para confirmar chegada, aguarde GPS recente com precisão de até 40 m.</p>}
               {ride.status === "motorista_chegou" && noShowRemaining !== null &&
                 <div className="driver-waiting"><span>Esperando passageiro · {String(Math.floor(noShowRemaining / 60)).padStart(2,"0")}:{String(noShowRemaining % 60).padStart(2,"0")}</span>
                   <button type="button" disabled={busy || noShowRemaining > 0} onClick={() => setNoShowConfirmOpen(true)}>Passageiro não apareceu</button></div>}
-              {!navEta && navigationTarget && <button type="button" className="driver-nav-fallback" onClick={() => window.open(navigationTarget.url, "_blank", "noopener,noreferrer")}>Abrir rota em outro mapa</button>}
+              {(!navEta || gpsWeak) && navigationTarget && <button type="button" className="driver-nav-fallback" onClick={() => window.open(navigationTarget.url, "_blank", "noopener,noreferrer")}>Abrir rota em outro mapa</button>}
               {notice && <p className="driver-nav-notice" role="alert">{notice}</p>}
             </div>
             {contactOpen && <div className="driver-contact-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setContactOpen(false); }}>
