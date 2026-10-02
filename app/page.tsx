@@ -3539,6 +3539,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const expiredOfferRef = useRef("");
   const [testingAlert, setTestingAlert] = useState(false);
   const [gpsExpanded, setGpsExpanded] = useState(false);
+  const [mapTilesUnavailable, setMapTilesUnavailable] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
   const [cancelStep, setCancelStep] = useState<0 | 1 | 2>(0);
   const [cancelReason, setCancelReason] = useState<DriverCancelReason | "">("");
@@ -4245,8 +4246,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
     if (!driverId) throw new Error("Sessão do motorista indisponível.");
     // Accepting a ride must not wait for a fresh GPS fix. The watch keeps trying;
     // the last known point is only a route preview, never a live GPS report.
-    const graph = roadGraph || await loadRegionPackage().catch(() => null);
-    if (graph) setRoadGraph(graph);
+    // The online route must be ready first. The regional offline package is
+    // already prefetched separately and must never delay the accepted ride.
+    const graph = roadGraph;
     const latestPosition = currentGpsPositionRef.current;
     // A previous fix is useful for a clearly labelled route preview. It is
     // never treated as a live position or used to confirm arrival.
@@ -4839,8 +4841,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
             centerTarget={liveLocation}
             centerRequest={navigationCenterRequest}
             onNavigationInteraction={ride && navPhase ? () => setFollowDriver(false) : undefined}
-            offlineRoads={roadGraph?.data}
+            offlineRoads={connectivity === "OFFLINE" ? roadGraph?.data : null}
             offlineMapActive={connectivity === "OFFLINE"}
+            onTilesUnavailableChange={setMapTilesUnavailable}
             diagnostics
           />
         </div>
@@ -4869,6 +4872,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
                 <span>{rerouting ? "Recalculando rota…" : gpsWeak ? gpsAlert : locationSyncError || trackingEtaError}</span>
                 {gpsWeak && <button type="button" onClick={retryGps} disabled={gpsRetrying}>{gpsRetrying ? "Buscando GPS…" : "Tentar GPS"}</button>}
               </div>}
+              {mapTilesUnavailable && connectivity !== "OFFLINE" && <div className="driver-nav-alert" role="status">O mapa de ruas não carregou. Use outro mapa para seguir até {navPhase === "pickup" ? "o passageiro" : "o destino"} enquanto tentamos recuperar a conexão.</div>}
             </div>
             <div className="driver-nav-floats">
               <button type="button" aria-label={voiceOn ? "Desligar orientação por voz" : "Ligar orientação por voz"} onClick={() => { if (voiceOn) window.speechSynthesis?.cancel(); announcedRef.current.clear(); setVoiceOn(!voiceOn); }}>{voiceOn ? <Volume2 /> : <VolumeX />}</button>
@@ -4900,7 +4904,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
               {ride.status === "motorista_chegou" && noShowRemaining !== null &&
                 <div className="driver-waiting"><span>Esperando passageiro · {String(Math.floor(noShowRemaining / 60)).padStart(2,"0")}:{String(noShowRemaining % 60).padStart(2,"0")}</span>
                   <button type="button" disabled={busy || noShowRemaining > 0} onClick={() => setNoShowConfirmOpen(true)}>Passageiro não apareceu</button></div>}
-              {(!navEta || gpsWeak) && navigationTarget && <button type="button" className="driver-nav-fallback" onClick={() => window.open(navigationTarget.url, "_blank", "noopener,noreferrer")}>Abrir rota em outro mapa</button>}
+              {(!navEta || gpsWeak || mapTilesUnavailable) && navigationTarget && <button type="button" className="driver-nav-fallback" onClick={() => window.open(navigationTarget.url, "_blank", "noopener,noreferrer")}>Abrir rota em outro mapa</button>}
               {notice && <p className="driver-nav-notice" role="alert">{notice}</p>}
             </div>
             {contactOpen && <div className="driver-contact-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setContactOpen(false); }}>

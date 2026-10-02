@@ -35,6 +35,7 @@ type RealMapProps = {
   landmarks?: Array<{ lat: number; lng: number; label: string; category: string }>;
   offlineRoads?: RoadPackage | null;
   offlineMapActive?: boolean;
+  onTilesUnavailableChange?: (unavailable: boolean) => void;
   diagnostics?: boolean;
 };
 
@@ -88,6 +89,7 @@ export function RealMap({
   landmarks = NO_LANDMARKS,
   offlineRoads,
   offlineMapActive = false,
+  onTilesUnavailableChange,
   diagnostics = false,
 }: RealMapProps) {
   const elementRef = useRef<HTMLDivElement>(null);
@@ -112,6 +114,10 @@ export function RealMap({
   const driverLng = driver?.lng;
 
   useEffect(() => {
+    onTilesUnavailableChange?.(tileUnavailable);
+  }, [onTilesUnavailableChange, tileUnavailable]);
+
+  useEffect(() => {
     onPickRef.current = onPick;
   }, [onPick]);
 
@@ -131,6 +137,7 @@ export function RealMap({
     if (!elementRef.current || mapRef.current) return;
     let disposed = false;
     let tileFallbackTimer = 0;
+    let tileRetryTimer = 0;
     void import("leaflet").then(async (module) => {
       if (disposed || !elementRef.current) return;
       const L = module.default;
@@ -153,8 +160,24 @@ export function RealMap({
       });
       let streetErrors = 0;
       let contrastErrors = 0;
+      const retryTiles = () => {
+        tileRetryTimer = 0;
+        if (disposed) return;
+        streetErrors = 0;
+        contrastErrors = 0;
+        if (map.hasLayer(contrast)) map.removeLayer(contrast);
+        if (!map.hasLayer(street)) street.addTo(map);
+        street.redraw();
+      };
+      const scheduleRetry = () => {
+        if (!tileRetryTimer) tileRetryTimer = window.setTimeout(retryTiles, 15_000);
+      };
       const tileLoaded = () => {
         window.clearTimeout(tileFallbackTimer);
+        window.clearTimeout(tileRetryTimer);
+        tileRetryTimer = 0;
+        streetErrors = 0;
+        contrastErrors = 0;
         if (!disposed) setTileUnavailable(false);
         if (diagnostics && process.env.NODE_ENV !== "production") console.info("[DRIVER_MAP] tile loaded");
       };
@@ -171,10 +194,16 @@ export function RealMap({
       contrast.on("tileerror", (event) => {
         if (diagnostics) console.error("[DRIVER_MAP] contrast tile error", event);
         contrastErrors += 1;
-        if (contrastErrors >= 3 && !disposed) setTileUnavailable(true);
+        if (contrastErrors >= 3 && !disposed) {
+          setTileUnavailable(true);
+          scheduleRetry();
+        }
       });
       tileFallbackTimer = window.setTimeout(() => {
-        if (!disposed) setTileUnavailable(true);
+        if (!disposed) {
+          setTileUnavailable(true);
+          scheduleRetry();
+        }
       }, 12000);
       street.addTo(map);
       L.control.layers({ Mapa: street, "Alto contraste": contrast }, undefined, { position: "topright" }).addTo(map);
@@ -190,6 +219,7 @@ export function RealMap({
     return () => {
       disposed = true;
       window.clearTimeout(tileFallbackTimer);
+      window.clearTimeout(tileRetryTimer);
       driverMarkerRef.current = null;
       driverMarkerModeRef.current = null;
       pickMarkerRef.current = null;
@@ -468,11 +498,10 @@ export function RealMap({
       const nextAutoFitKey = trackingBadgeTitle
         ? `tracking:${origin?.lat ?? ""}:${origin?.lng ?? ""}:${destination?.lat ?? ""}:${destination?.lng ?? ""}:${route?.length ? "route" : "waiting"}`
         : mapViewportKey({ origin, destination, route });
+      // The map already has working tiles before the driver accepts. Do not
+      // fit the whole route and replace that viewport during navigation.
       if (navigationMode) {
-        if (shouldAutoFitViewport(lastAutoFitKeyRef.current, nextAutoFitKey)) {
-          lastAutoFitKeyRef.current = nextAutoFitKey;
-          window.requestAnimationFrame(refit);
-        }
+        lastAutoFitKeyRef.current = "";
       } else if (!nextAutoFitKey) {
         lastAutoFitKeyRef.current = "";
       } else if (
@@ -541,18 +570,15 @@ export function RealMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !navigationMode || navigation || !destination) return;
-    map.setView([destination.lat, destination.lng], 15);
+    map.panTo([destination.lat, destination.lng], { animate: true, duration: 0.5 });
   }, [destination, mapReady, navigation, navigationMode]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !navigation || !navigationFollow) return;
     const position: [number, number] = [navigation.position.lat, navigation.position.lng];
-    if (map.getZoom() !== navigation.zoom) {
-      map.setView(position, navigation.zoom, { animate: true, duration: 0.5 });
-    } else {
-      map.panTo(position, { animate: true, duration: 0.5 });
-    }
+    // Keep the zoom and its loaded tiles when the ride changes state.
+    map.panTo(position, { animate: true, duration: 0.5 });
     const icon = driverMarkerRef.current?.getElement();
     icon?.style.setProperty("--moto-heading", `${navigation.heading ?? 0}deg`);
   }, [mapReady, navigation, navigationFollow]);
