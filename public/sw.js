@@ -1,4 +1,4 @@
-const SW_BUILD_ID = "cfbbe5fc2c7d";
+const SW_BUILD_ID = "41adef051eb8";
 const SHELL_CACHE = `moto-pombal-shell-${SW_BUILD_ID}`;
 const STATIC_CACHE = `moto-pombal-static-${SW_BUILD_ID}`;
 const REGION_CACHE = "moto-pombal-region-packages";
@@ -46,19 +46,21 @@ self.addEventListener("activate", (event) => {
     Promise.all([
       caches
         .keys()
-        .then((keys) =>
-          Promise.all(
+        .then((keys) => {
+          // CacheStorage lista por ordem de criação. Guarde a geração anterior
+          // para os chunks de outra aba aberta e limite a retenção a duas.
+          const previousStaticCache = keys
+            .filter((key) => key !== STATIC_CACHE && /^moto-pombal-static-(?:[a-f0-9]{12}|v\d+)$/.test(key))
+            .at(-1);
+          return Promise.all(
             keys
               .filter((key) => {
-                if (key === SHELL_CACHE || key === STATIC_CACHE || key === REGION_CACHE) return false;
-                // Uma aba já aberta pode precisar de chunks da versão anterior.
-                const staticVersion = /^moto-pombal-static-v(\d+)$/.exec(key);
-                if (staticVersion && Number(staticVersion[1]) >= 10) return false;
+                if (key === SHELL_CACHE || key === STATIC_CACHE || key === REGION_CACHE || key === previousStaticCache) return false;
                 return key.startsWith("moto-syxp-") || key.startsWith("moto-vip-") || key.startsWith("moto-pombal-");
               })
               .map((key) => caches.delete(key)),
-          ),
-        ),
+          );
+        }),
       self.clients.claim(),
     ]),
   );

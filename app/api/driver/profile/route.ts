@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { ApiError, audit, consumeRateLimit, jsonError, requireUser } from "@/lib/backend/api";
 import { saveDriverVehicle, vehicleSchema } from "@/lib/backend/driver-vehicle";
+import { brazilianPhoneSchema, profilePhoneError } from "@/lib/auth/phone-validation";
+import { assertProfilePhoneAvailable } from "@/lib/auth/phone-lookup";
 
 const fieldsSchema = z.object({
   fullName: z.string().trim().min(3, "Informe o nome completo.").max(100),
-  phone: z.string().trim().regex(/^\+?[0-9 ()-]{10,20}$/, "Telefone inválido."),
+  phone: brazilianPhoneSchema,
 }).merge(vehicleSchema);
 
 const avatarTypes: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
@@ -43,6 +45,7 @@ export async function POST(request: Request) {
     if (contentLength > 3 * 1024 * 1024) throw new ApiError(413, "O cadastro enviado é muito grande.", "PAYLOAD_TOO_LARGE");
     const body = await request.formData();
     const input = fieldsSchema.parse({ fullName: body.get("fullName"), phone: body.get("phone"), brand: body.get("brand"), model: body.get("model"), color: body.get("color"), plate: body.get("plate") });
+    await assertProfilePhoneAvailable(supabase, user.id, input.phone);
     const vehicleResult = await saveDriverVehicle(supabase, user.id, {
       brand: input.brand, model: input.model, color: input.color, plate: input.plate,
     }, { resubmitRejected: true });
@@ -60,7 +63,7 @@ export async function POST(request: Request) {
     const profileValues: Record<string, string> = { full_name: input.fullName, phone: input.phone };
     if (avatarPath) profileValues.avatar_url = avatarPath;
     const profileUpdate = await supabase.from("profiles").update(profileValues).eq("id", user.id);
-    if (profileUpdate.error) throw profileUpdate.error;
+    if (profileUpdate.error) throw profilePhoneError(profileUpdate.error);
     await audit(supabase, user.id, "driver.profile_submitted", "driver", user.id, { vehicleId: vehicleResult.vehicle.id });
     return Response.json({ vehicle: vehicleResult.vehicle, approvalStatus: vehicleResult.approvalStatus, avatarUrl: await signedAvatar(supabase, avatarPath) });
   } catch (error) { return jsonError(error); }

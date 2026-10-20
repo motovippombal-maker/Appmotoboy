@@ -189,3 +189,20 @@ test("25. status financeiro falsificado permanece bloqueado", async () => {
   await assert.rejects(asUser(users.passenger, "update public.payments set status='pago'"), /permission denied|permiss/i);
   assert.match(await source("app/api/payments/cash/route.ts"), /cashConfirmationSchema/);
 });
+
+test("26. motorista com oferta não lê diretamente dados da entrega; contato é liberado só após aceite", async () => {
+  const passengerId = await account();
+  const driverId = await account("driver");
+  await db.query("update public.drivers set approval_status='approved',online=true,available=true where profile_id=$1", [driverId]);
+  await db.query("insert into public.driver_locations(driver_id,latitude,longitude) values ($1,-10.83,-38.53)", [driverId]);
+  const id = await ride(passengerId, null, "procurando_motorista");
+  const serviceDetails = { description: "Pedido 42", recipientName: "Maria Silva", recipientPhone: "+5575999991234" };
+  await db.query("update public.rides set service_type='food',service_details=$2 where id=$1", [id, serviceDetails]);
+  await db.query("insert into public.ride_requests(ride_id,driver_id,expires_at) values ($1,$2,now()+interval '5 minutes')", [id, driverId]);
+  assert.equal((await asUser(driverId, "select id from public.ride_requests where ride_id=$1", [id])).length, 1);
+  assert.equal((await asUser(driverId, "select service_details from public.rides where id=$1", [id])).length, 0);
+  assert.equal((await row("select public.accept_ride($1,$2) as accepted", [id, driverId])).accepted, true);
+  assert.deepEqual((await asUser(driverId, "select service_details from public.rides where id=$1", [id]))[0].service_details, serviceDetails);
+  assert.equal((await asUser(users.otherDriver, "select service_details from public.rides where id=$1", [id])).length, 0);
+  await db.query("select public.cancel_ride($1,$2,'Encerrar teste')", [id, passengerId]);
+});

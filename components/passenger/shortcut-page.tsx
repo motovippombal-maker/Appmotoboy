@@ -6,6 +6,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, ChevronRight, Headphones, History, Home, Ticket } from "lucide-react";
 import { useMotoVip, type HistoryRide } from "@/hooks/use-moto-vip";
+import { RideServiceSummary } from "@/components/passenger/ride-service-booking";
+import { getRideService } from "@/lib/ride-service";
 
 type Section = "corridas" | "cupons" | "notificacoes" | "suporte";
 type Backend = ReturnType<typeof useMotoVip>;
@@ -33,7 +35,7 @@ function HistoryContent({ backend }: { backend: Backend }) {
   return <div className="shortcut-list">{backend.passengerHistory.map((ride: HistoryRide) => (
     <details className="shortcut-card" key={ride.id}>
       <summary>
-        <span><small>{date(ride.completed_at || ride.created_at)}</small><b>{ride.destination_address}</b><small>{ride.status.replaceAll("_", " ")}</small></span>
+        <span><small>{date(ride.completed_at || ride.created_at)}</small><b>{ride.destination_address}</b><small>{getRideService(ride.service_type).label} · {ride.status.replaceAll("_", " ")}</small></span>
         <strong>{money(ride.final_fare_cents ?? ride.fare_cents)}</strong>
         <ChevronRight aria-hidden="true" />
       </summary>
@@ -42,6 +44,7 @@ function HistoryContent({ backend }: { backend: Backend }) {
         <div><dt>Destino</dt><dd>{ride.destination_address}</dd></div>
         <div><dt>Motorista</dt><dd>{ride.driver_name || "Não informado"}</dd></div>
       </dl>
+      <RideServiceSummary ride={ride} compact />
     </details>
   ))}</div>;
 }

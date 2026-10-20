@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
+import { bookingActionContext } from "./helpers/passenger-booking-actions";
 
 import {
   canActivateWithKeyboard,
@@ -105,10 +106,20 @@ test("12. toque em botão ou aba possui feedback visual imediato", () => {
 });
 
 test("12a. tocar no ponto de partida solicita o GPS e mantém busca manual disponível", () => {
-  assert.match(
-    pageSource,
-    /className="motovip-address-pickup"[\s\S]*?onClick=\{\(\) => void requestCurrentLocation\(\)\}/,
-  );
+  let gpsRequests = 0;
+  let editorOpened = 0;
+  const actions = bookingActionContext({
+    isDelivery: false,
+    requestCurrentLocation: () => { gpsRequests += 1; },
+    setDestinationSearchOpen: (open: boolean) => { if (open) editorOpened += 1; },
+  });
+  actions.clickPickup();
+  assert.equal(gpsRequests, 1);
+  assert.equal(editorOpened, 0);
+  actions.values.isDelivery = true;
+  actions.clickPickup();
+  assert.equal(editorOpened, 1);
+  assert.equal(gpsRequests, 1);
   assert.match(pageSource, /aria-busy=\{gpsBusy\}/);
   assert.match(pageSource, /Obtendo sua localização…/);
   assert.match(pageSource, /setSheetMode\("expanded"\);[\s\S]*?setGpsBusy\(false\)/);

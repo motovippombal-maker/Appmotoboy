@@ -4,6 +4,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import vm from "node:vm";
+import ts from "typescript";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { parsePublicSiteUrl, parseSupabaseUrl, configuredSecret } from "../lib/config/public-site-url.mjs";
@@ -12,6 +13,7 @@ import { assertOnlineConnection } from "../lib/pwa/network.ts";
 import { shouldReloadForWorkerChange } from "../lib/pwa/update.ts";
 import { discardSubscriptionFromAnotherUser, retirePushSubscription } from "../lib/push/subscription-client.ts";
 import { isPublicPushEndpoint } from "../lib/push/endpoint.ts";
+import { startSessionRecovery } from "../lib/auth/session-recovery.ts";
 
 const root = process.cwd();
 const source = (file) => readFile(path.join(root, file), "utf8");
@@ -255,9 +257,55 @@ test("11. sem internet, aceite de oferta é bloqueado pelo mesmo gate", async ()
 });
 test("12. reconexão apenas ressincroniza; não reenvia corrida ou dinheiro", async () => {
   const hook = await source("hooks/use-moto-vip.ts");
-  const sync = hook.slice(hook.indexOf("const synchronize ="), hook.indexOf('window.addEventListener("focus"'));
-  assert.match(sync, /refresh\(session\)/);
-  assert.doesNotMatch(sync, /requestRide|acceptRide|confirmCashPayment/);
+  const parsed = ts.createSourceFile("use-moto-vip.ts", hook, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  let recoveryCall;
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "startSessionRecovery")
+      recoveryCall = node;
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  assert.ok(recoveryCall, "O hook precisa instalar a recuperação de sessão.");
+  const browser = new EventTarget();
+  const document = Object.assign(new EventTarget(), { hidden: false });
+  const navigator = { onLine: false };
+  const session = { user: { id: "session-user" } };
+  const refreshes = [];
+  const operations = [];
+  const errors = [];
+  const operation = (name) => (...args) => { operations.push({ name, args }); return Promise.resolve(); };
+  const sandbox = {
+    session, profileRole: "passenger", realtimeStatus: "disconnected",
+    refresh: async (current) => { refreshes.push(current); },
+    setError: (message) => errors.push(message),
+    api: operation("api"), requestRide: operation("requestRide"),
+    acceptRide: operation("acceptRide"), confirmCashPayment: operation("confirmCashPayment"),
+    startSessionRecovery: (options) => startSessionRecovery({ ...options, environment: {
+      window: browser, document, navigator, every: () => () => {},
+    } }),
+  };
+  // Execute the hook's actual callback through its actual recovery manager.
+  const compiled = ts.transpileModule(`(${recoveryCall.getText(parsed)})`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+  }).outputText;
+  const stop = vm.runInNewContext(compiled, sandbox);
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  browser.dispatchEvent(new Event("online"));
+  await flush();
+  assert.equal(refreshes.length, 0, "Offline não deve disparar novas operações.");
+  navigator.onLine = true;
+  for (const event of ["online", "moto-vip:network-restored", "focus"]) {
+    browser.dispatchEvent(new Event(event));
+    await flush();
+  }
+  assert.equal(refreshes.length, 3);
+  assert.ok(refreshes.every((current) => current === session));
+  assert.deepEqual(operations, [], "Reconectar não pode reenviar solicitação, aceite ou pagamento.");
+  assert.deepEqual(errors, []);
+  stop();
+  browser.dispatchEvent(new Event("moto-vip:network-restored"));
+  await flush();
+  assert.equal(refreshes.length, 3, "A recuperação precisa ser removida ao encerrar a sessão.");
   assert.match(await source("components/pwa-register.tsx"), /moto-vip:network-restored/);
 });
 test("13. Push sem VAPID e despachante retorna não configurado", () => {

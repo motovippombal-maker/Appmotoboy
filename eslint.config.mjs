@@ -12,6 +12,15 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated output, local tooling state and verification artifacts.
+    "dist/**",
+    ".vinext/**",
+    ".wrangler/**",
+    ".npm-cache/**",
+    ".sites-runtime/**",
+    ".codex-verification/**",
+    "work/**",
+    "outputs/**",
   ]),
   {
     files: ["components/ui/**/*.{ts,tsx}", "hooks/use-mobile.ts"],

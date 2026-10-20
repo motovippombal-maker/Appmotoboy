@@ -1,6 +1,7 @@
 import { jsonError, requireUser } from "@/lib/backend/api";
 import { expireRideSearches } from "@/lib/backend/dispatch";
 import { distanceKm } from "@/lib/backend/routing";
+import { rideServiceOfferDetails } from "@/lib/ride-service";
 
 export async function GET(request: Request) {
   try {
@@ -31,7 +32,9 @@ export async function GET(request: Request) {
         passenger_name: names.get(ride?.passenger_id) || "Passageiro",
         distance_to_pickup_meters: pickupDistance === null ? null : Math.round(pickupDistance * 1000),
         estimated_time_to_pickup_seconds: pickupDistance === null ? null : Math.max(60, Math.round((pickupDistance * 1000) / 7)),
-        ride,
+        // O contato do destinatário só é disponibilizado ao motorista vinculado,
+        // nos endpoints de corrida ativa e navegação após o aceite.
+        ride: ride ? { ...ride, service_details: rideServiceOfferDetails(ride.service_details) } : ride,
       };
     });
     return Response.json({ offers });

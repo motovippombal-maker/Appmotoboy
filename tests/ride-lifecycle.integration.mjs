@@ -7,6 +7,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 
 let database;
+let legacyRideId;
 
 async function value(sql, params = []) {
   const result = await database.query(sql, params);
@@ -88,6 +89,9 @@ before(async () => {
   const migrationsDirectory = path.join(process.cwd(), "supabase", "migrations");
   const migrations = (await readdir(migrationsDirectory)).filter((file) => file.endsWith(".sql")).sort();
   for (const migration of migrations) {
+    if (migration === "20261020120000_ride_service_types.sql") {
+      legacyRideId = await createRide(await seedPassenger());
+    }
     await database.exec(await readFile(path.join(migrationsDirectory, migration), "utf8"));
   }
 });
@@ -105,6 +109,84 @@ test("1. passageiro solicita e motorista aceita normalmente", async () => {
   assert.equal(await acceptRide(rideId, driver.id), true);
   assert.deepEqual(await value("select status, driver_id from public.rides where id = $1", [rideId]), { status: "aceita", driver_id: driver.id });
   assert.equal((await value("select status from public.ride_requests where ride_id = $1 and driver_id = $2", [rideId, driver.id])).status, "accepted");
+});
+
+test("1a. migração preserva a corrida antiga, origem, destino e valor como passageiro", async () => {
+  assert.deepEqual(await value("select service_type, service_details, status, origin_address, destination_address, fare_cents from public.rides where id = $1", [legacyRideId]), {
+    service_type: "passenger", service_details: {}, status: "procurando_motorista", origin_address: "Origem", destination_address: "Destino", fare_cents: 700,
+  });
+});
+
+const deliveryDetails = {
+  description: "Pedido 42: dois lanches", recipientName: "Maria Silva", recipientPhone: "+5575999991234",
+  pickupNotes: "Retirar no balcão", dropoffNotes: "Chamar no portão",
+};
+
+test("1b. entregas preservam os dados em todas as etapas e cobram somente a tarifa da rota uma vez", async () => {
+  for (const service of ["delivery", "food", "market", "pharmacy"]) {
+    const driver = await seedDriver();
+    const rideId = await createRide(await seedPassenger());
+    await database.query("update public.rides set service_type = $2, service_details = $3 where id = $1", [rideId, service, deliveryDetails]);
+    await createOffer(rideId, driver.id);
+    assert.equal(await acceptRide(rideId, driver.id), true);
+    await database.query("update public.rides set status = 'motorista_a_caminho' where id = $1", [rideId]);
+    await database.query("update public.rides set status = 'motorista_chegou', arrived_at = now() where id = $1", [rideId]);
+    const started = (await value("select to_jsonb(public.start_ride($1, $2)) as ride", [rideId, driver.id])).ride;
+    assert.equal(started.status, "em_corrida");
+    assert.equal(started.service_type, service);
+    assert.deepEqual(started.service_details, deliveryDetails);
+    const finished = (await value("select to_jsonb(public.finish_ride($1, $2)) as ride", [rideId, driver.id])).ride;
+    assert.equal(finished.status, "finalizada");
+    assert.equal(finished.service_type, service);
+    assert.deepEqual(finished.service_details, deliveryDetails);
+    assert.equal(finished.final_fare_cents, 700);
+    await database.query("select public.finish_ride($1, $2)", [rideId, driver.id]);
+    assert.deepEqual(await value("select count(*)::integer as count, max(amount_cents) as amount from public.payments where ride_id = $1", [rideId]), { count: 1, amount: 700 });
+    await database.query("update public.drivers set online = false, available = false where profile_id = $1", [driver.id]);
+  }
+});
+
+test("1c. banco recusa serviço desconhecido, destinatário ausente e instruções grandes demais", async () => {
+  const rideId = await createRide(await seedPassenger());
+  const attempts = [
+    ["unknown", deliveryDetails], ["food", {}], ["food", { ...deliveryDetails, recipientPhone: "123" }],
+    ["food", { ...deliveryDetails, pickupNotes: "x".repeat(301) }], ["passenger", deliveryDetails],
+  ];
+  for (const [service, serviceDetails] of attempts) {
+    await assert.rejects(database.query("update public.rides set service_type = $2, service_details = $3 where id = $1", [rideId, service, serviceDetails]), /rides_service_(type|details)_valid/);
+  }
+  assert.deepEqual(await value("select service_type, service_details from public.rides where id = $1", [rideId]), { service_type: "passenger", service_details: {} });
+});
+
+test("1d. cancelamento do motorista redistribui a entrega sem perder o pedido e o destinatário", async () => {
+  await database.query("update public.drivers set online = false, available = false");
+  const first = await seedDriver();
+  const next = await seedDriver();
+  const passengerId = await seedPassenger();
+  const rideId = await createRide(passengerId);
+  await database.query("update public.rides set service_type = 'food', service_details = $2 where id = $1", [rideId, deliveryDetails]);
+  assert.equal((await value("select public.dispatch_next_offer($1) as driver", [rideId])).driver, first.id);
+  assert.equal(await acceptRide(rideId, first.id), true);
+  const redispatched = (await value("select to_jsonb(public.driver_cancel_and_redispatch($1, $2, 'mechanical', 'Pneu furado')) as ride", [rideId, first.id])).ride;
+  assert.equal(redispatched.status, "procurando_motorista");
+  assert.equal(redispatched.service_type, "food");
+  assert.deepEqual(redispatched.service_details, deliveryDetails);
+  assert.equal(await acceptRide(rideId, next.id), true);
+  const cancelled = (await value("select to_jsonb(public.cancel_ride($1, $2, 'Cancelado pelo solicitante')) as ride", [rideId, passengerId])).ride;
+  assert.equal(cancelled.status, "cancelada");
+  assert.equal(cancelled.service_type, "food");
+  assert.deepEqual(cancelled.service_details, deliveryDetails);
+  await database.query("update public.drivers set online = false, available = false where profile_id in ($1, $2)", [first.id, next.id]);
+});
+
+test("1e. campos de serviço continuam protegidos contra escrita direta do passageiro e do motorista", async () => {
+  for (const role of ["anon", "authenticated"]) {
+    for (const column of ["service_type", "service_details"]) {
+      for (const privilege of ["INSERT", "UPDATE"]) {
+        assert.equal((await value("select has_column_privilege($1, 'public.rides', $2, $3) as allowed", [role, column, privilege])).allowed, false);
+      }
+    }
+  }
 });
 
 test("2. todas as ofertas expiram e a busca termina", async () => {

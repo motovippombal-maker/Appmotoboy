@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import path from "node:path";
+import { createContext, runInContext } from "node:vm";
+import ts from "typescript";
 
 import { ApiError } from "../lib/backend/errors";
 import {
@@ -274,11 +276,200 @@ test("16. mapa não mantém marcadores de cidade com coordenadas duplicadas no c
   assert.match(map, /marker\.on\("dragend"/);
 });
 
-test("17. painel exige confirmação do PIN e grava a coordenada escolhida", async () => {
-  const page = await source("app/page.tsx");
-  assert.match(page, /DEFINIR LOCALIZAÇÃO NO MAPA/);
-  assert.match(page, /locationVerified: true/);
-  assert.match(page, /<RealMap pickPoint=\{quickPlaceMapPoint\} onPick=\{setQuickPlaceMapPoint\}/);
+async function adminPlaceActions() {
+  const admin = await source("components/admin/operations-panel.tsx");
+  const parsed = ts.createSourceFile("operations-panel.tsx", admin, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  function find(predicate: (node: ts.Node) => boolean, node: ts.Node = parsed): ts.Node | undefined {
+    if (predicate(node)) return node;
+    return ts.forEachChild(node, (child) => find(predicate, child));
+  }
+  function attribute(node: ts.Node, name: string) {
+    const value = find((child) => ts.isJsxAttribute(child) && child.name.getText(parsed) === name, node);
+    if (!value || !ts.isJsxAttribute(value) || !value.initializer) return undefined;
+    return ts.isJsxExpression(value.initializer) ? value.initializer.expression?.getText(parsed) : value.initializer.getText(parsed);
+  }
+  const functions = ["run", "invalidatePlaceGeocode", "closePlaceEditor", "editPlace", "savePlace", "placeCoordinates", "confirmPlaceLocation"].map((name) =>
+    find((node) => ts.isFunctionDeclaration(node) && node.name?.text === name)?.getText(parsed) ?? "");
+  const emptyPlace = find((node) => ts.isVariableDeclaration(node) && node.name.getText(parsed) === "emptyPlace");
+  assert.ok(emptyPlace && ts.isVariableDeclaration(emptyPlace) && emptyPlace.initializer);
+  const geocode = find((node) => ts.isJsxOpeningElement(node) && node.tagName.getText(parsed) === "button" &&
+    Boolean(attribute(node, "onClick")?.includes("backend.geocodeQuickPlace")));
+  const map = find((node) => ts.isJsxSelfClosingElement(node) && node.tagName.getText(parsed) === "RealMap" && attribute(node, "pickPoint") === "mapPoint");
+  const latitude = find((node) => ts.isJsxSelfClosingElement(node) && node.tagName.getText(parsed) === "input" && attribute(node, "value") === "placeForm.latitude");
+  const longitude = find((node) => ts.isJsxSelfClosingElement(node) && node.tagName.getText(parsed) === "input" && attribute(node, "value") === "placeForm.longitude");
+  const address = find((node) => ts.isJsxSelfClosingElement(node) && node.tagName.getText(parsed) === "input" && attribute(node, "value") === "placeForm.address");
+  const confirm = find((node) => ts.isJsxOpeningElement(node) && node.tagName.getText(parsed) === "button" && attribute(node, "onClick") === "confirmPlaceLocation");
+  const cancel = find((node) => ts.isJsxOpeningElement(node) && node.tagName.getText(parsed) === "button" &&
+    ts.isJsxElement(node.parent) && node.parent.children.some((child) => ts.isJsxText(child) && child.getText(parsed).trim() === "Cancelar"));
+  assert.ok(geocode && map && latitude && longitude && address && cancel);
+  const saved: Array<Record<string, unknown>> = [];
+  const geocoded = { address: "Endereço sugerido", latitude: -10.8123456789, longitude: -38.5765432198 };
+  const context = createContext({
+    placeForm: {}, mapPoint: null, busy: "", message: "", placeEditor: true, placeGeocodeRef: { current: 0 },
+    backend: { quickPlaces: [], refresh: async () => {}, geocodeQuickPlace: async () => geocoded,
+      saveQuickPlace: async (payload: Record<string, unknown>) => { saved.push(payload); } },
+  });
+  for (const field of ["Busy", "Message", "MapPoint", "PlaceEditor"])
+    context[`set${field}`] = (value: unknown) => {
+      const key = field[0].toLowerCase() + field.slice(1);
+      context[key] = typeof value === "function" ? value(context[key]) : value;
+    };
+  context.setPlaceForm = (update: unknown) => { context.placeForm = typeof update === "function" ? update(context.placeForm) : update; };
+  const code = `const emptyPlace = ${emptyPlace.initializer.getText(parsed)};\n${functions.join("\n")}\n` +
+    `const geocodeAction = ${attribute(geocode, "onClick")};\nconst pickMapPoint = ${attribute(map, "onPick")};\n` +
+    `const changeLatitude = ${attribute(latitude, "onChange")};\nconst changeLongitude = ${attribute(longitude, "onChange")};\n` +
+    `const changeAddress = ${attribute(address, "onChange")};\n` +
+    `const cancelPlace = ${attribute(cancel, "onClick")};\n` +
+    `const confirmationDisabled = () => ${confirm ? attribute(confirm, "disabled") : "true"};\nplaceForm = { ...emptyPlace(0), name: "Local teste", address: "Rua de teste" };`;
+  runInContext(ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText, context);
+  return {
+    saved, geocoded, context,
+    form: () => context.placeForm as { latitude: string; longitude: string; locationVerified: boolean },
+    geocode: async () => { runInContext("geocodeAction()", context); await new Promise<void>((done) => setImmediate(done)); },
+    save: () => runInContext("savePlace({ preventDefault() {} })", context) as Promise<void>,
+    pick: (point: { lat: number; lng: number }) => { context.point = point; runInContext("pickMapPoint(point)", context); },
+    edit: (place: Record<string, unknown>) => { context.place = place; runInContext("editPlace(place)", context); },
+    confirm: () => runInContext("confirmPlaceLocation()", context),
+    close: () => runInContext("cancelPlace()", context),
+    confirmationDisabled: () => runInContext("confirmationDisabled()", context) as boolean,
+    hasKeyboardButton: () => Boolean(confirm && attribute(confirm, "type") === '"button"'),
+    address: (value: string) => { context.addressEvent = { target: { value } }; runInContext("changeAddress(addressEvent)", context); },
+    coordinates: (lat: string, lng: string) => {
+      context.latitudeEvent = { target: { value: lat } }; context.longitudeEvent = { target: { value: lng } };
+      runInContext("changeLatitude(latitudeEvent); changeLongitude(longitudeEvent);", context);
+    },
+  };
+}
+
+test("17. painel ativo exige confirmação explícita do PIN depois da geocodificação", async () => {
+  const actions = await adminPlaceActions();
+  await actions.geocode();
+  assert.equal(actions.form().locationVerified, false);
+  await actions.save();
+  assert.equal(actions.saved.length, 0);
+  assert.match(String(actions.context.message), /Confirme a localização/);
+  assert.ok(actions.hasKeyboardButton());
+  actions.confirm();
+  await actions.save();
+  assert.equal(actions.saved.length, 1);
+  assert.equal(actions.saved[0].latitude, actions.geocoded.latitude);
+  assert.equal(actions.saved[0].longitude, actions.geocoded.longitude);
+  assert.equal(actions.saved[0].locationVerified, true);
   const adminRoute = await source("app/api/admin/quick-places/route.ts");
   assert.match(adminRoute, /input\.active && !input\.locationVerified/);
+});
+
+test("18. clique ou arrasto confirma as coordenadas exatas sem arredondá-las", async () => {
+  const actions = await adminPlaceActions();
+  const point = { lat: -10.8123456789, lng: -38.5765432198 };
+  actions.pick(point);
+  assert.equal(actions.form().locationVerified, true);
+  await actions.save();
+  assert.equal(actions.saved[0].latitude, point.lat);
+  assert.equal(actions.saved[0].longitude, point.lng);
+});
+
+test("19. teclado confirma coordenadas válidas e impede confirmação vazia ou fora dos limites", async () => {
+  const actions = await adminPlaceActions();
+  assert.ok(actions.hasKeyboardButton());
+  assert.equal(actions.confirmationDisabled(), true);
+  actions.confirm();
+  assert.equal(actions.form().locationVerified, false);
+  actions.coordinates("91", "-38.5765432198");
+  assert.equal(actions.confirmationDisabled(), true);
+  actions.confirm();
+  assert.equal(actions.form().locationVerified, false);
+  actions.coordinates("-10.8123456789", "-38.5765432198");
+  assert.equal(actions.form().locationVerified, false);
+  assert.equal(actions.confirmationDisabled(), false);
+  // Botão nativo type=button recebe Enter/Space sem depender de eventos de ponteiro.
+  actions.confirm();
+  assert.equal(actions.form().locationVerified, true);
+  assert.equal((actions.context.mapPoint as { lat: number }).lat, -10.8123456789);
+  await actions.save();
+  assert.equal(actions.saved[0].latitude, -10.8123456789);
+});
+
+test("20. editar ponto existente preserva sua localização confirmada até o endereço ou coordenadas mudarem", async () => {
+  const actions = await adminPlaceActions();
+  const existing = { id: "place-existing", name: "Local", address: "Endereço cadastrado", latitude: -10.8123456789,
+    longitude: -38.5765432198, category: "generic", icon: "pin", color: "#1688ff", active: true, featured: false, sort_order: 10 };
+  actions.edit(existing);
+  assert.equal(actions.form().locationVerified, true);
+  await actions.save();
+  assert.equal(actions.saved[0].id, existing.id);
+  assert.equal(actions.saved[0].latitude, existing.latitude);
+  actions.edit(existing);
+  actions.address("Outro endereço cadastrado");
+  assert.equal(actions.form().locationVerified, false);
+  await actions.save();
+  assert.equal(actions.saved.length, 1);
+  actions.edit(existing);
+  actions.coordinates("-10.82", "-38.58");
+  assert.equal(actions.form().locationVerified, false);
+  await actions.save();
+  assert.equal(actions.saved.length, 1);
+});
+
+function deferredGeocode() {
+  let resolve!: (result: { address: string; latitude: number; longitude: number }) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<{ address: string; latitude: number; longitude: number }>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+const flushAdmin = () => new Promise<void>((done) => setImmediate(done));
+
+test("21. geocodificação atrasada não desfaz PIN manual escolhido durante a busca", async () => {
+  const actions = await adminPlaceActions();
+  const pending = deferredGeocode();
+  actions.context.backend.geocodeQuickPlace = () => pending.promise;
+  await actions.geocode();
+  const point = { lat: -10.91, lng: -38.61 };
+  actions.pick(point);
+  pending.resolve(actions.geocoded);
+  await flushAdmin();
+  assert.equal(Number(actions.form().latitude), point.lat);
+  assert.equal(Number(actions.form().longitude), point.lng);
+  assert.equal(actions.form().locationVerified, true);
+  assert.equal(actions.context.busy, "");
+});
+
+test("22. fechar e abrir outro formulário impede resposta antiga de misturar endereço e coordenadas", async () => {
+  const actions = await adminPlaceActions();
+  const pending = deferredGeocode();
+  actions.context.backend.geocodeQuickPlace = () => pending.promise;
+  await actions.geocode();
+  actions.close();
+  const other = { id: "place-B", name: "Local B", address: "Endereço B", latitude: -10.91, longitude: -38.61,
+    category: "generic", icon: "pin", color: "#1688ff", active: true, featured: false, sort_order: 20 };
+  actions.edit(other);
+  pending.resolve(actions.geocoded);
+  await flushAdmin();
+  assert.equal(actions.context.placeForm.id, other.id);
+  assert.equal(actions.context.placeForm.address, other.address);
+  assert.equal(Number(actions.form().latitude), other.latitude);
+  assert.equal(actions.form().locationVerified, true);
+});
+
+test("23. respostas, erros e finally antigos não apagam aviso ou loading de uma nova busca", async () => {
+  for (const outcome of ["success", "error"]) {
+    const actions = await adminPlaceActions();
+    const first = deferredGeocode(), latest = deferredGeocode();
+    let calls = 0;
+    actions.context.backend.geocodeQuickPlace = () => ++calls === 1 ? first.promise : latest.promise;
+    await actions.geocode();
+    actions.address("Novo endereço para busca");
+    await actions.geocode();
+    actions.context.message = "Buscando endereço mais recente";
+    if (outcome === "success") first.resolve(actions.geocoded);
+    else first.reject(new Error("Falha antiga"));
+    await flushAdmin();
+    assert.equal(actions.context.busy, "geocode");
+    assert.equal(actions.context.message, "Buscando endereço mais recente");
+    latest.resolve({ ...actions.geocoded, address: "Novo endereço localizado" });
+    await flushAdmin();
+    assert.equal(actions.context.busy, "");
+    assert.equal(actions.context.placeForm.address, "Novo endereço localizado");
+    assert.equal(actions.form().locationVerified, false);
+  }
 });

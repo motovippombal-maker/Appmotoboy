@@ -1,6 +1,6 @@
 # MotoPombal
 
-Plataforma de mototáxi digital para Ribeira do Pombal/BA. O projeto reúne os fluxos de passageiro, motorista e administração com Supabase, localização, mapa, corridas em tempo real e tarifas administráveis por região.
+Plataforma de mototáxi e entregas para Ribeira do Pombal/BA. O projeto reúne os fluxos de cliente, motorista e administração com Supabase, localização, mapa, corridas e entregas em tempo real e tarifas administráveis por região.
 
 ## Funcionalidades
 
@@ -9,6 +9,8 @@ Plataforma de mototáxi digital para Ribeira do Pombal/BA. O projeto reúne os f
 - disponibilidade Online/Offline e localização controlada;
 - Leaflet + OpenStreetMap e rotas OSRM;
 - solicitação, oferta, aceite atômico e acompanhamento de corridas;
+- escolha de serviço: passageiro, encomendas, comida, mercado e farmácia;
+- retirada e entrega com descrição do pedido, destinatário e instruções para o motorista;
 - início, chegada, finalização, cancelamento, histórico e avaliações;
 - tarifa protegida no backend por região/bairro;
 - tarifa padrão da cidade e regiões especiais administráveis;
@@ -63,6 +65,13 @@ O ambiente de desenvolvimento abre normalmente em `http://localhost:5173`.
 
 ```bash
 npm run lint
+npm run test:auth
+npm run test:tracking
+npm run test:location
+npm run test:offline
+npm run test:services
+npm run test:rides
+npm run test:regressions
 npx tsc --noEmit
 npm run build
 npm run build:vercel
@@ -71,9 +80,23 @@ npm run test:production
 
 O caminho principal de publicação é Next.js nativo na Vercel: `npm run build:vercel` valida esse build e `vercel.json` o seleciona na plataforma. `npm run build` mantém Vinext/Cloudflare como caminho secundário de desenvolvimento e validação; não há deploy Cloudflare homologado nesta etapa. Execute `test:production` após os builds, pois ele verifica os bundles gerados. Para configuração e futura publicação deliberada, siga [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md). Nenhum comando de deploy faz parte desta etapa.
 
+Sem as variáveis reais do Supabase, `build:vercel` interrompe corretamente na validação do ambiente. Para conferir apenas a compilação nesse caso, use `npx next build --experimental-build-mode compile` e depois `npx tsc --noEmit`. O modo `compile` não executa a prerenderização nem a checagem de tipos do App Router; esses comandos não substituem o build completo de publicação.
+
+### Dependências verificadas em 20/10/2026
+
+Next.js, React e as dependências vulneráveis com correções compatíveis foram atualizados. A auditoria `npm audit --omit=dev` retornou zero vulnerabilidades. A auditoria completa ainda registra 12 avisos nas ferramentas de desenvolvimento, nas cadeias de `braces` (ESLint/Vinext) e do `esbuild` antigo usado pelo Drizzle Kit. Essas cadeias ainda exigem atualização dos fornecedores; não foram aplicados downgrades forçados para silenciar o relatório. Repita a auditoria ao atualizar dependências.
+
 ## Banco de dados
 
 As migrations incrementais estão em `supabase/migrations`. Antes de uma aplicação autorizada, confira o histórico real do projeto Supabase e preserve a ordem crescente: a migration financeira da Etapa 7 (`20260929100000`) antecede a migration de segurança da Etapa 8 (`20260929110000`). Nenhuma das duas foi aplicada ao banco real nesta etapa. Nunca reaplique cegamente conteúdo que o banco já recebeu.
+
+### Atualização de integridade de 20/10/2026
+
+A versão atual também exige as migrations `20261020130000_profile_phone_identity.sql` e `20261020131000_recover_unoffered_rides.sql`, após a migration dos serviços de entrega. A primeira protege a identidade por telefone, incluindo cadastros antigos, edição de contato e aliases de autenticação. O login utiliza uma RPC restrita ao servidor; aplique essa migration antes de publicar o backend atualizado. Se ela ainda não existir, o acesso por telefone retorna indisponibilidade controlada.
+
+A migration de identidade interrompe a atualização caso encontre telefones duplicados ou conflito de titularidade com aliases existentes. Ela não apaga nem mescla contas e não reescreve telefones legados: a central deve conferir a titularidade desses casos antes de tentar novamente. A segunda migration recupera solicitações que ficaram sem a primeira oferta por mais de dois minutos e libera reservas de cupom de solicitações incompletas que precisem ser encerradas.
+
+As transições também conferem a atribuição e o horário de aceite, evitando que uma ação atrasada do motorista anterior altere uma corrida redistribuída. As migrations são verificadas em banco isolado pelos testes; nenhuma atualização do Supabase real é executada pelo aplicativo ou pelos comandos de build.
 
 Principais etapas:
 
@@ -85,6 +108,16 @@ Principais etapas:
 6. tarifas por região/bairro.
 
 ## Tarifa atual e área de atendimento
+
+### Corridas e entregas
+
+Na tela inicial, escolha **Passageiro**, **Encomendas**, **Comida**, **Mercado** ou **Farmácia**. Entregas exigem local de retirada e de entrega, descrição do pedido, nome e telefone de quem recebe. As instruções de retirada e entrega são opcionais. Os pontos rápidos da cidade definem o local de retirada quando um serviço de entrega está selecionado; Casa, Trabalho e favoritos continuam definindo o destino.
+
+Comida, mercado e farmácia atendem pedidos combinados diretamente com o estabelecimento e prontos para retirada. O valor mostrado no aplicativo é o transporte, calculado pela tarifa regional vigente, e não inclui os produtos. O motorista vê o serviço e os dados do pedido antes de aceitar, confirma a retirada e depois a entrega. Os dados também aparecem no acompanhamento, no histórico, na administração e no pacote de navegação offline.
+
+Para habilitar essas solicitações no Supabase, aplique a migration incremental `supabase/migrations/20261020120000_ride_service_types.sql` após as migrations anteriores, seguindo o processo de atualização do seu ambiente. Ela preserva corridas existentes como `passenger`. A API mantém compatibilidade com solicitações de passageiros quando faltam apenas os campos de entrega; uma entrega será bloqueada com mensagem de ativação pendente, sem descartar os dados do pedido. Essa compatibilidade não dispensa a migration de identidade exigida pelo login. As migrations não são aplicadas automaticamente pelo aplicativo.
+
+### Valores regionais
 
 A cobrança regional é resolvida no backend pelas coordenadas de origem e destino:
 

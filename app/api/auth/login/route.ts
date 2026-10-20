@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { normalizeBrazilianPhone } from "@/lib/auth/phone-identity";
+import { brazilianPhoneSchema } from "@/lib/auth/phone-validation";
 import {
   createSupabaseAuthClient,
   findUserEmailByPhone,
@@ -10,7 +10,7 @@ import {
 import { jsonError } from "@/lib/backend/api";
 
 const schema = z.object({
-  phone: z.string().trim().min(10).max(24),
+  phone: brazilianPhoneSchema,
   // Existing accounts may predate the current eight-character signup rule.
   password: z.string().min(1).max(128),
 }).strict();
@@ -18,7 +18,7 @@ const schema = z.object({
 export async function POST(request: Request) {
   try {
     const input = schema.parse(await request.json());
-    const phone = normalizeBrazilianPhone(input.phone);
+    const phone = input.phone;
     const admin = await rateLimitAuth(request, phone, "login");
     const email = await findUserEmailByPhone(admin, phone);
     const auth = createSupabaseAuthClient();

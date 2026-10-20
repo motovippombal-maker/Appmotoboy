@@ -3,7 +3,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { createClient, type Session } from "@supabase/supabase-js";
 import { ApiError, consumeRateLimit } from "@/lib/backend/api";
-import { normalizeBrazilianPhone, phoneAuthEmail } from "@/lib/auth/phone-identity";
+import { phoneAuthEmail } from "@/lib/auth/phone-identity";
+import { resolvePhoneIdentity } from "@/lib/auth/phone-lookup";
 import { parseSupabaseUrl } from "@/lib/config/public-site-url.mjs";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
 
@@ -41,31 +42,15 @@ export async function findProfileByPhone(
   supabase: ReturnType<typeof createSupabaseAdminClient>,
   normalizedPhone: string,
 ) {
-  const pageSize = 1000;
-  for (let from = 0; ; from += pageSize) {
-    const { data, error } = await supabase.from("profiles")
-      .select("id,phone")
-      .not("phone", "is", null)
-      .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
-    if (error) throw error;
-    const profile = (data || []).find((item) => {
-      try { return normalizeBrazilianPhone(item.phone || "") === normalizedPhone; }
-      catch { return false; }
-    });
-    if (profile || (data || []).length < pageSize) return profile;
-  }
+  return resolvePhoneIdentity(supabase, normalizedPhone);
 }
 
 export async function findUserEmailByPhone(
   supabase: ReturnType<typeof createSupabaseAdminClient>,
   normalizedPhone: string,
 ) {
-  const profile = await findProfileByPhone(supabase, normalizedPhone);
-  if (!profile) return phoneAuthEmail(normalizedPhone);
-  const { data: userData, error: userError } = await supabase.auth.admin.getUserById(profile.id);
-  if (userError) throw userError;
-  return userData.user.email || phoneAuthEmail(normalizedPhone);
+  const identity = await resolvePhoneIdentity(supabase, normalizedPhone);
+  return identity?.email || phoneAuthEmail(normalizedPhone);
 }
 
 export function invalidCredentials() {

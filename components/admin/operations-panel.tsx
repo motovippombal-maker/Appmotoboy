@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
   Activity,
@@ -28,7 +28,9 @@ import {
   X,
 } from "lucide-react";
 import { RealMap, type LivePoint } from "@/components/map/real-map";
+import { RideServiceSummary } from "@/components/passenger/ride-service-booking";
 import { type CancellationPolicy } from "@/lib/backend/cancellation-policy";
+import { type RideServiceDetails, type RideServiceType } from "@/lib/ride-service";
 import {
   type AdminDriver,
   type QuickPlace,
@@ -64,6 +66,8 @@ type QueueEntry = {
 };
 type AdminRide = {
   id: string;
+  service_type?: RideServiceType;
+  service_details?: RideServiceDetails;
   passenger_id: string;
   driver_id: string | null;
   origin_address: string;
@@ -223,6 +227,7 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
     null,
   );
   const [placeEditor, setPlaceEditor] = useState(false);
+  const placeGeocodeRef = useRef(0);
   const [placeForm, setPlaceForm] = useState(() =>
     emptyPlace(backend.quickPlaces.length),
   );
@@ -402,6 +407,7 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
   );
 
   function navigate(next: Section) {
+    closePlaceEditor();
     setSection(next);
     setQuery("");
     setMobileMenu(false);
@@ -415,15 +421,20 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
     key: string,
     action: () => Promise<unknown>,
     success: string,
+    isCurrent?: () => boolean,
   ) {
+    if (isCurrent && !isCurrent()) return false;
     setBusy(key);
     setMessage("");
     try {
       await action();
+      if (isCurrent && !isCurrent()) return false;
       await backend.refresh();
+      if (isCurrent && !isCurrent()) return false;
       setMessage(success);
       return true;
     } catch (error) {
+      if (isCurrent && !isCurrent()) return false;
       setMessage(
         error instanceof Error
           ? error.message
@@ -431,7 +442,7 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
       );
       return false;
     } finally {
-      setBusy("");
+      if (!isCurrent || isCurrent()) setBusy("");
     }
   }
   async function queueAction(driverId: string, paused: boolean) {
@@ -458,7 +469,16 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
     );
     if (success) setSelectedDriver(null);
   }
+  function invalidatePlaceGeocode() {
+    placeGeocodeRef.current += 1;
+    setBusy((current) => current === "geocode" ? "" : current);
+  }
+  function closePlaceEditor() {
+    invalidatePlaceGeocode();
+    setPlaceEditor(false);
+  }
   function editPlace(place?: QuickPlace) {
+    invalidatePlaceGeocode();
     setPlaceForm(
       place
         ? {
@@ -484,9 +504,28 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
     );
     setPlaceEditor(true);
   }
+  function placeCoordinates() {
+    if (!placeForm.latitude.trim() || !placeForm.longitude.trim()) return null;
+    const lat = Number(placeForm.latitude);
+    const lng = Number(placeForm.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180)
+      return null;
+    return { lat, lng };
+  }
+  function confirmPlaceLocation() {
+    if (busy === "geocode") return;
+    const coordinates = placeCoordinates();
+    if (!coordinates) {
+      setMessage("Informe latitude e longitude válidas antes de confirmar a localização.");
+      return;
+    }
+    invalidatePlaceGeocode();
+    setMapPoint(coordinates);
+    setPlaceForm((current) => ({ ...current, locationVerified: true }));
+  }
   async function savePlace(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!placeForm.locationVerified) {
+    if (busy === "geocode" || !placeForm.locationVerified || !placeCoordinates()) {
       setMessage("Confirme a localização no mapa antes de salvar.");
       return;
     }
@@ -509,7 +548,7 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
         }),
       "Ponto salvo com sucesso.",
     );
-    if (saved) setPlaceEditor(false);
+    if (saved) closePlaceEditor();
   }
   async function reorder(target: string) {
     if (!dragged || dragged === target) return;
@@ -2000,7 +2039,7 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
             setSelectedCancellation(null);
             setSelectedPassenger(null);
             setSelectedDriver(null);
-            setPlaceEditor(false);
+            closePlaceEditor();
           }}
         >
           <aside
@@ -2033,7 +2072,7 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
                   setSelectedCancellation(null);
                   setSelectedPassenger(null);
                   setSelectedDriver(null);
-                  setPlaceEditor(false);
+                  closePlaceEditor();
                 }}
                 aria-label="Fechar painel"
               >
@@ -2106,6 +2145,7 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
                     <dt>Distância ao embarque</dt><dd>{selectedRide.cancellation_evidence?.distance_to_pickup_meters ?? "—"} m</dd>
                   </>}
                 </dl>
+                <RideServiceSummary ride={selectedRide} />
                 <div className="ops-detail-map">
                   <RealMap
                     origin={{
@@ -2345,32 +2385,37 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
                     required
                     minLength={5}
                     value={placeForm.address}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      invalidatePlaceGeocode();
                       setPlaceForm({
                         ...placeForm,
                         address: event.target.value,
                         locationVerified: false,
-                      })
-                    }
+                      });
+                    }}
                   />
                 </label>
                 <button
                   type="button"
                   className="ops-small-button"
                   disabled={busy === "geocode" || !placeForm.address.trim()}
-                  onClick={() =>
+                  onClick={() => {
+                    const requestId = ++placeGeocodeRef.current;
+                    const isCurrent = () => requestId === placeGeocodeRef.current;
                     void run(
                       "geocode",
                       async () => {
+                        setPlaceForm((current) => ({ ...current, locationVerified: false }));
                         const result = await backend.geocodeQuickPlace(
                           placeForm.address,
                         );
+                        if (!isCurrent()) return;
                         setPlaceForm((current) => ({
                           ...current,
                           latitude: String(result.latitude),
                           longitude: String(result.longitude),
                           address: result.address,
-                          locationVerified: true,
+                          locationVerified: false,
                         }));
                         setMapPoint({
                           lat: result.latitude,
@@ -2378,8 +2423,9 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
                         });
                       },
                       "Endereço localizado. Confira o marcador no mapa.",
-                    )
-                  }
+                      isCurrent,
+                    );
+                  }}
                 >
                   {busy === "geocode" ? "Buscando…" : "Buscar endereço"}
                 </button>
@@ -2390,14 +2436,17 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
                       required
                       type="number"
                       step="any"
+                      min={-90}
+                      max={90}
                       value={placeForm.latitude}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        invalidatePlaceGeocode();
                         setPlaceForm({
                           ...placeForm,
                           latitude: event.target.value,
                           locationVerified: false,
-                        })
-                      }
+                        });
+                      }}
                     />
                   </label>
                   <label>
@@ -2406,14 +2455,17 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
                       required
                       type="number"
                       step="any"
+                      min={-180}
+                      max={180}
                       value={placeForm.longitude}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        invalidatePlaceGeocode();
                         setPlaceForm({
                           ...placeForm,
                           longitude: event.target.value,
                           locationVerified: false,
-                        })
-                      }
+                        });
+                      }}
                     />
                   </label>
                 </div>
@@ -2421,21 +2473,31 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
                   <RealMap
                     pickPoint={mapPoint}
                     onPick={(point) => {
+                      invalidatePlaceGeocode();
                       setMapPoint(point);
                       setPlaceForm((current) => ({
                         ...current,
-                        latitude: point.lat.toFixed(7),
-                        longitude: point.lng.toFixed(7),
+                        latitude: String(point.lat),
+                        longitude: String(point.lng),
                         locationVerified: true,
                       }));
                     }}
                   />
                 </div>
-                <small>
+                <small id="ops-place-location-status" role="status">
                   {placeForm.locationVerified
                     ? "Localização confirmada no mapa"
-                    : "Toque no mapa para confirmar a localização"}
+                    : "Confira o marcador e confirme a localização. Você também pode ajustar as coordenadas."}
                 </small>
+                <button
+                  type="button"
+                  className="ops-small-button"
+                  aria-describedby="ops-place-location-status"
+                  disabled={busy === "geocode" || !placeCoordinates()}
+                  onClick={confirmPlaceLocation}
+                >
+                  Confirmar localização no mapa
+                </button>
                 <label>
                   Ícone
                   <select
@@ -2485,13 +2547,13 @@ export function AdminOperationsPanel({ backend }: { backend: Backend }) {
                   </label>
                 </div>
                 <div className="ops-drawer-actions">
-                  <button type="button" onClick={() => setPlaceEditor(false)}>
+                  <button type="button" onClick={closePlaceEditor}>
                     Cancelar
                   </button>
                   <button
                     type="submit"
                     className="ops-primary"
-                    disabled={busy === "place" || !placeForm.locationVerified}
+                    disabled={busy === "place" || busy === "geocode" || !placeForm.locationVerified}
                   >
                     {busy === "place" ? "Salvando…" : "Salvar ponto"}
                   </button>

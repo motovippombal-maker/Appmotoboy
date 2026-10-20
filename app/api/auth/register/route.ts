@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { normalizeBrazilianPhone, normalizeBrazilianPlate, phoneAuthEmail } from "@/lib/auth/phone-identity";
+import { normalizeBrazilianPlate, phoneAuthEmail } from "@/lib/auth/phone-identity";
+import { brazilianPhoneSchema, profilePhoneError } from "@/lib/auth/phone-validation";
 import { createSupabaseAuthClient, findProfileByPhone, publicSession, rateLimitAuth } from "@/lib/auth/server";
 import { ApiError, jsonError } from "@/lib/backend/api";
 
@@ -11,7 +12,7 @@ const vehicle = z.object({
 
 const schema = z.object({
   fullName: z.string().trim().min(3, "Informe seu nome completo.").max(100),
-  phone: z.string().trim().min(10).max(24),
+  phone: brazilianPhoneSchema,
   password: z.string().min(8, "Use uma senha com pelo menos 8 caracteres.").max(128),
   role: z.enum(["passenger", "driver"]),
   vehicle: vehicle.optional(),
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
   let createdUserId: string | null = null;
   try {
     const input = schema.parse(await request.json());
-    const phone = normalizeBrazilianPhone(input.phone);
+    const phone = input.phone;
     const admin = await rateLimitAuth(request, phone, "register");
     const duplicatePhone = await findProfileByPhone(admin, phone);
     if (duplicatePhone) throw new ApiError(409, "Este celular já está cadastrado. Entre na sua conta.", "PHONE_ALREADY_REGISTERED");
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
     if (createError || !created.user) {
       const duplicate = createError?.code === "email_exists" || /already|registered|exists/i.test(createError?.message || "");
       if (duplicate) throw new ApiError(409, "Este celular já está cadastrado. Entre na sua conta.", "PHONE_ALREADY_REGISTERED");
-      throw createError || new Error("User creation failed");
+      throw profilePhoneError(createError) || new Error("User creation failed");
     }
     createdUserId = created.user.id;
 

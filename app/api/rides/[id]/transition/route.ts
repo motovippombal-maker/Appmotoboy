@@ -4,6 +4,7 @@ import { distanceKm } from "@/lib/backend/routing";
 import { parseCancellationPolicy } from "@/lib/backend/cancellation-policy";
 import { dispatchPushQueue } from "@/lib/backend/push";
 import { hasPreciseAccuracy } from "@/lib/location/driver-location-input";
+import { rideAssignmentFilters, sameRideAssignment } from "@/lib/backend/ride-assignment";
 
 const schema = z.object({ status: z.enum(["motorista_a_caminho", "motorista_chegou", "em_corrida", "finalizada", "cancelada"]), reason: z.string().max(300).optional(),
   reasonCode: z.enum(["mechanical", "personal", "cannot_reach", "unsafe", "passenger_requested", "address", "other"]).optional(),
@@ -90,11 +91,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
       return Response.json({ rideId: id, status: input.status, ride: changedRide });
     }
+    if (profile.role !== "admin" && (profile.role !== "driver" || ride.driver_id !== user.id)) throw new ApiError(403, "Somente o motorista vinculado pode executar esta ação.", "DRIVER_ONLY");
     if (ride.status === input.status) return Response.json({ rideId: id, status: input.status, ride, duplicate: true });
     if (driverTransitions[ride.status] !== input.status) {
       throw new ApiError(409, "Mudança de status não permitida.", "INVALID_RIDE_TRANSITION");
     }
-    if (profile.role !== "admin" && (profile.role !== "driver" || ride.driver_id !== user.id)) throw new ApiError(403, "Somente o motorista vinculado pode executar esta ação.", "DRIVER_ONLY");
     let arrivalVerified = false;
     if (input.status === "motorista_chegou") {
       const { data: setting } = await supabase.from("system_settings").select("value")
@@ -119,13 +120,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     const timestamps: Record<string, string> = {}; const now = new Date().toISOString();
     if (input.status === "motorista_chegou") timestamps.arrived_at = input.offlineEvent?.timestamp || now;
-    const { data: changedRide, error: updateError } = await supabase.from("rides").update({ status: input.status, ...timestamps,
+    let transition = supabase.from("rides").update({ status: input.status, ...timestamps,
       ...(input.status === "motorista_chegou" ? { arrival_verified: arrivalVerified, arrival_server_at: now } : {}) })
-      .eq("id", id).eq("status", ride.status).select("id").maybeSingle();
+      .eq("id", id).eq("status", ride.status);
+    for (const guard of rideAssignmentFilters(ride))
+      transition = transition.filter(guard.column, guard.operator, guard.value);
+    const { data: changedRide, error: updateError } = await transition.select("id").maybeSingle();
     if (updateError) throw updateError;
     if (!changedRide) {
-      const { data: currentRide } = await supabase.from("rides").select("id,status").eq("id", id).maybeSingle();
-      if (currentRide?.status === input.status) return Response.json({ rideId: id, status: input.status, duplicate: true });
+      const { data: currentRide } = await supabase.from("rides").select("id,status,driver_id,accepted_at").eq("id", id).maybeSingle();
+      if (currentRide?.status === input.status && sameRideAssignment(ride, currentRide)) return Response.json({ rideId: id, status: input.status, duplicate: true });
       throw new ApiError(409, "O status desta corrida já foi alterado.", "RIDE_STATE_CHANGED");
     }
     await supabase.from("ride_history").insert({ ride_id: id, from_status: ride.status, to_status: input.status, actor_id: user.id,

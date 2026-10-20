@@ -6,13 +6,16 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { PUSH_OWNER_KEY, discardSubscriptionFromAnotherUser, retirePushSubscription } from "@/lib/push/subscription-client";
 import { assertOnlineConnection } from "@/lib/pwa/network";
 import { friendlyAuthError } from "@/lib/supabase/auth-errors";
+import { startSessionRecovery } from "@/lib/auth/session-recovery";
+import { mergeDriverLocationEvent, mergeDriverLocationSnapshot, type DriverLocationState } from "@/lib/tracking/driver-location-state";
 import {
-  newerLocation,
   normalizeRealtimeStatus,
   shouldResynchronizeRealtime,
   type RealtimeConnectionState,
 } from "@/lib/tracking/realtime";
 import { DEFAULT_CANCELLATION_POLICY, type CancellationPolicy } from "@/lib/backend/cancellation-policy";
+import type { RideServiceDetails, RideServiceType } from "@/lib/ride-service";
+import type { RideRequestInput } from "@/lib/backend/ride-request";
 
 export class BackendApiError extends Error {
   constructor(
@@ -34,6 +37,8 @@ export type Profile = {
 };
 export type Ride = {
   id: string;
+  service_type?: RideServiceType;
+  service_details?: RideServiceDetails;
   passenger_id: string;
   driver_id?: string;
   status: string;
@@ -343,9 +348,8 @@ export function useMotoVip() {
   const driverQueueRequest = useRef(0);
   const [driverAvatarUrl, setDriverAvatarUrl] = useState<string | null>(null);
   const [passengerAvatarUrl, setPassengerAvatarUrl] = useState<string | null>(null);
-  const [driverLocation, setDriverLocation] = useState<DriverLocation | null>(
-    null,
-  );
+  const [driverTracking, setDriverTracking] = useState<DriverLocationState<DriverLocation>>(null);
+  const driverLocation = driverTracking?.location ?? null;
   const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
   const [adminMapDrivers, setAdminMapDrivers] = useState<NearbyDriver[]>([]);
   const [fareConfig, setFareConfig] = useState<FareConfig | null>(null);
@@ -370,6 +374,7 @@ export function useMotoVip() {
   const [adminFinance, setAdminFinance] = useState<AdminFinance | null>(null);
   const dismissedCompletedRide = useRef<string | null>(null);
   const refreshGeneration = useRef(0);
+  const rideSnapshotRequest = useRef(0);
   const authenticatedUserId = useRef<string | null | undefined>(undefined);
   const [realtimeStatus, setRealtimeStatus] =
     useState<RealtimeConnectionState>("connecting");
@@ -497,6 +502,7 @@ export function useMotoVip() {
       setSession(currentSession);
       setError(null);
       if (!currentSession) {
+        rideSnapshotRequest.current += 1;
         driverQueueRequest.current += 1;
         setProfile(null);
         setActiveRide(null);
@@ -511,7 +517,7 @@ export function useMotoVip() {
         setQueuePriorityAlertId(null);
         setDriverAvatarUrl(null);
         setPassengerAvatarUrl(null);
-        setDriverLocation(null);
+        setDriverTracking(null);
         setAdminStats(null);
         setAdminMapDrivers([]);
         setFareConfig(null);
@@ -550,6 +556,7 @@ export function useMotoVip() {
       const typedProfile = foundProfile as Profile;
       setProfile(typedProfile);
       if (typedProfile.role !== "admin") {
+        const snapshotRequest = ++rideSnapshotRequest.current;
         const active = await api<{
           ride: Ride | null;
           completedRide: Ride | null;
@@ -558,16 +565,18 @@ export function useMotoVip() {
           driverLocation: DriverLocation | null;
         }>("/api/rides/active");
         if (generation !== refreshGeneration.current) return;
-        setActiveRide(active.ride);
-        setCancelledRide(active.cancelledRide);
-        setRideSnapshotVerified(true);
-        setCancellationPolicy(active.cancellationPolicy);
-        setCompletedRide(
-          active.completedRide?.id === dismissedCompletedRide.current
-            ? null
-            : active.completedRide,
-        );
-        setDriverLocation(active.driverLocation);
+        if (snapshotRequest === rideSnapshotRequest.current) {
+          setActiveRide(active.ride);
+          setCancelledRide(active.cancelledRide);
+          setRideSnapshotVerified(true);
+          setCancellationPolicy(active.cancellationPolicy);
+          setCompletedRide(
+            active.completedRide?.id === dismissedCompletedRide.current
+              ? null
+              : active.completedRide,
+          );
+          setDriverTracking((current) => mergeDriverLocationSnapshot(current, active.ride, active.driverLocation));
+        }
       }
       if (typedProfile.blocked) {
         driverQueueRequest.current += 1;
@@ -802,8 +811,12 @@ export function useMotoVip() {
         { event: "*", schema: "public", table: "rides" },
         (payload) => {
           const changed = payload.new as Partial<Ride>;
+          if (activeRideId && changed.id === activeRideId) rideSnapshotRequest.current += 1;
+          if (activeRideId && changed.id === activeRideId && changed.driver_id !== undefined &&
+            changed.driver_id !== activeRideDriverId) setDriverTracking(null);
           if (activeRideId && changed.id === activeRideId && changed.status === "cancelada") {
             setActiveRide(null);
+            setDriverTracking(null);
             if (profileRole === "driver" && changed.driver_id && changed.passenger_id)
               setCancelledRide({ id: changed.id, driver_id: changed.driver_id, passenger_id: changed.passenger_id,
                 status: "cancelada", cancelled_at: changed.cancelled_at || null, cancelled_by: changed.cancelled_by || null,
@@ -812,7 +825,7 @@ export function useMotoVip() {
           if (profileRole === "driver" && activeRideId && changed.id === activeRideId &&
             changed.driver_id === null && changed.status === "procurando_motorista") {
             setActiveRide(null);
-            setDriverLocation(null);
+            setDriverTracking(null);
           }
           window.dispatchEvent(new Event("moto-pombal:rides-changed"));
           void refresh(session).catch(() => undefined);
@@ -888,16 +901,11 @@ export function useMotoVip() {
             updatedAt: point.updated_at,
             rideId: point.ride_id,
           };
-          setDriverLocation((current) => {
-            const next = newerLocation(current, incoming, activeRideId);
-            return next === incoming
-              ? {
-                  ...incoming,
-                  stale: false,
-                  freshnessSeconds: current?.freshnessSeconds,
-                }
-              : current;
-          });
+          setDriverTracking((current) => mergeDriverLocationEvent(current, activeRideId, point.driver_id, {
+            ...incoming,
+            stale: false,
+            freshnessSeconds: current?.location?.freshnessSeconds,
+          }));
         },
       );
     if (["passenger", "admin"].includes(profileRole))
@@ -930,10 +938,12 @@ export function useMotoVip() {
     const verify = async () => {
       if (stopped || inFlight || document.hidden) return;
       inFlight = true;
+      const snapshotRequest = ++rideSnapshotRequest.current;
       try {
-        const snapshot = await api<{ ride: Ride | null; cancelledRide: CancelledRide | null; cancellationPolicy: CancellationPolicy }>("/api/rides/active");
-        if (stopped) return;
+        const snapshot = await api<{ ride: Ride | null; cancelledRide: CancelledRide | null; cancellationPolicy: CancellationPolicy; driverLocation: DriverLocation | null }>("/api/rides/active");
+        if (stopped || snapshotRequest !== rideSnapshotRequest.current) return;
         setActiveRide(snapshot.ride);
+        setDriverTracking((current) => mergeDriverLocationSnapshot(current, snapshot.ride, snapshot.driverLocation));
         setCancelledRide(snapshot.cancelledRide);
         setRideSnapshotVerified(true);
         setCancellationPolicy(snapshot.cancellationPolicy);
@@ -950,30 +960,13 @@ export function useMotoVip() {
   }, [activeRideId, api, profileRole, refreshDriverQueue, session]);
 
   useEffect(() => {
-    if (!session || !profile) return;
-    const interval = window.setInterval(
-      () => {
-        if (!document.hidden && navigator.onLine)
-          void refresh(session).catch(() => undefined);
-      },
-      profile.role === "admin" || realtimeStatus === "connected" ? 30000 : 10000,
-    );
-    return () => window.clearInterval(interval);
-  }, [profile, realtimeStatus, refresh, session]);
-
-  useEffect(() => {
     if (!session) return;
-    const synchronize = () =>
-      void refresh(session).catch(() =>
-        setError("Reconectando ao MotoPombal..."),
-      );
-    window.addEventListener("moto-vip:network-restored", synchronize);
-    window.addEventListener("focus", synchronize);
-    return () => {
-      window.removeEventListener("moto-vip:network-restored", synchronize);
-      window.removeEventListener("focus", synchronize);
-    };
-  }, [refresh, session]);
+    return startSessionRecovery({
+      role: profileRole,
+      realtimeConnected: realtimeStatus === "connected",
+      synchronize: () => refresh(session).catch(() => setError("Reconectando ao MotoPombal...")),
+    });
+  }, [profileRole, realtimeStatus, refresh, session]);
 
   const updateLocation = useCallback(
     (position: GeolocationPosition, rideId?: string) =>
@@ -1115,7 +1108,7 @@ export function useMotoVip() {
       if (ownsPush) window.localStorage.removeItem(PUSH_OWNER_KEY);
       await supabase.auth.signOut({ scope: "local" });
     },
-    requestRide: async (payload: unknown) => {
+    requestRide: async (payload: RideRequestInput) => {
       let result: { ride: Ride };
       try {
         result = await api<{ ride: Ride }>("/api/rides/request", {
@@ -1130,8 +1123,10 @@ export function useMotoVip() {
         result = { ride: current.ride };
       }
       refreshGeneration.current += 1;
+      rideSnapshotRequest.current += 1;
       setCompletedRide(null);
       setActiveRide(result.ride);
+      setDriverTracking((current) => mergeDriverLocationSnapshot(current, result.ride, null));
       return result.ride;
     },
     estimateRide: (payload: unknown) =>
@@ -1270,8 +1265,9 @@ export function useMotoVip() {
         method: "POST",
         body: JSON.stringify({ status: "cancelada", reasonCode, reason }),
       });
+      rideSnapshotRequest.current += 1;
       setActiveRide((current) => current?.id === rideId ? null : current);
-      setDriverLocation(null);
+      setDriverTracking(null);
       setOffers([]);
       return result;
     },
@@ -1279,8 +1275,9 @@ export function useMotoVip() {
       const result = await api<{ ride: Ride }>(`/api/rides/${rideId}/early-end`, {
         method: "POST", body: JSON.stringify({ reason }),
       });
+      rideSnapshotRequest.current += 1;
       setActiveRide((current) => current?.id === rideId ? null : current);
-      setDriverLocation(null);
+      setDriverTracking(null);
       setCompletedRide(result.ride);
       return result;
     },

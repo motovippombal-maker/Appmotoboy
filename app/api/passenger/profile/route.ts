@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { ApiError, audit, consumeRateLimit, jsonError, requireUser } from "@/lib/backend/api";
+import { brazilianPhoneSchema, profilePhoneError } from "@/lib/auth/phone-validation";
+import { assertProfilePhoneAvailable } from "@/lib/auth/phone-lookup";
 
 const schema = z.object({
   fullName: z.string().trim().min(3, "Informe seu nome completo.").max(100),
-  phone: z.string().trim().regex(/^\+?[0-9 ()-]{10,20}$/, "Telefone inválido."),
+  phone: brazilianPhoneSchema,
 });
 const avatarTypes: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 type Client = Awaited<ReturnType<typeof requireUser>>["supabase"];
@@ -32,6 +34,7 @@ export async function POST(request: Request) {
     }
     const body = await request.formData();
     const input = schema.parse({ fullName: body.get("fullName"), phone: body.get("phone") });
+    await assertProfilePhoneAvailable(supabase, user.id, input.phone);
     const avatar = body.get("avatar");
     let avatarPath: string | undefined;
     if (avatar instanceof File && avatar.size > 0) {
@@ -54,7 +57,7 @@ export async function POST(request: Request) {
     const values: Record<string, string> = { full_name: input.fullName, phone: input.phone };
     if (avatarPath) values.avatar_url = avatarPath;
     const { error } = await supabase.from("profiles").update(values).eq("id", user.id);
-    if (error) throw error;
+    if (error) throw profilePhoneError(error);
     await audit(supabase, user.id, "passenger.profile_updated", "passenger", user.id, { photoChanged: Boolean(avatarPath) });
     return Response.json({ profile: { ...values, avatarUrl: await signedAvatar(supabase, avatarPath) } });
   } catch (error) { return jsonError(error); }

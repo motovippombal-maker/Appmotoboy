@@ -5,6 +5,8 @@ import { readExecutionProfile } from "./execution-profile.mjs";
 
 const [command, ...args] = process.argv.slice(2);
 if (!["dev", "build"].includes(command)) throw new Error("Expected dev or build.");
+// Both production targets stamp once before their bundler copies public assets.
+if (command === "build") await import("./stamp-service-worker.mjs");
 const managedLinux = readExecutionProfile() === "managed-linux";
 
 if (managedLinux && command === "build") {

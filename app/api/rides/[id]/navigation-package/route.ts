@@ -12,7 +12,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (requestedPoint && !isValidCoordinates(requestedPoint)) throw new ApiError(400, "GPS inválido.", "INVALID_GPS");
     const { supabase, user } = await requireUser(request, ["driver"]);
     const { data: ride, error } = await supabase.from("rides")
-      .select("id,driver_id,passenger_id,status,origin_address,origin_lat,origin_lng,destination_address,destination_lat,destination_lng,distance_meters,duration_seconds,route_geometry,fare_cents,fare_pricing_mode,payment_method,payment_status,created_at,accepted_at,started_at")
+      .select("*")
       .eq("id", id).eq("driver_id", user.id).maybeSingle();
     if (error) throw error;
     if (!ride || !["aceita", "motorista_a_caminho", "motorista_chegou", "em_corrida"].includes(ride.status))

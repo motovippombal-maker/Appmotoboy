@@ -49,7 +49,6 @@ import {
   Ticket,
   TreePine,
   Trophy,
-  Trash2,
   Utensils,
   GripVertical,
   Church,
@@ -75,6 +74,8 @@ import { syncOfflineRide } from "@/lib/offline/ride-sync";
 import { selectDriverRide } from "@/lib/driver/ride-authority";
 import { shouldAcceptGpsFix } from "@/lib/tracking/driver-gps";
 import { PassengerCentral } from "@/components/passenger/passenger-central";
+import { DeliveryDetailsForm, RideServicePicker, RideServiceSummary } from "@/components/passenger/ride-service-booking";
+import { getRideService, rideServiceSchema, type RideServiceDetails, type RideServiceType } from "@/lib/ride-service";
 import { loadSavedPlaces, persistSavedPlaces, type SavedPlace } from "@/lib/passenger/saved-places";
 import {
   coordinatesFromGeolocation,
@@ -89,7 +90,6 @@ import {
   useMotoVip,
   BackendApiError,
   type AddressResult,
-  type FareConfig,
   type HistoryRide,
   type NearbyDriver,
   type QuickPlace,
@@ -699,6 +699,7 @@ function AddressField({
     if (!liveSearch || !focused || selected || value.trim().length < 3) return;
     const sequence = ++searchSequence.current;
     const timer = window.setTimeout(async () => {
+      if (searchSequence.current !== sequence) return;
       setSearching(true);
       setSearchError("");
       try {
@@ -1221,7 +1222,7 @@ function PassengerMobilePanel({
                     }).format(new Date(item.completed_at || item.created_at))}
                   </small>
                   <b>{item.destination_address}</b>
-                  <em>{rideStatusLabel(item.status)}</em>
+                  <em>{getRideService(item.service_type).label} · {rideStatusLabel(item.status)}</em>
                 </span>
                 <strong>{money(item.final_fare_cents ?? item.fare_cents)}</strong>
                 <ChevronRight />
@@ -1231,6 +1232,7 @@ function PassengerMobilePanel({
         )}
         {view === "ride-details" && selectedRide && (
           <article className="mobile-ride-details">
+            <RideServiceSummary ride={selectedRide} />
             <div>
               <small>Origem</small>
               <b>{selectedRide.origin_address}</b>
@@ -1348,6 +1350,9 @@ function PassengerMobilePanel({
 }
 
 function PassengerPanel({ backend }: { backend: Backend }) {
+  const [serviceType, setServiceType] = useState<RideServiceType>("passenger");
+  const serviceTypeRef = useRef<RideServiceType>("passenger");
+  const [serviceDetails, setServiceDetails] = useState<RideServiceDetails>({});
   const [originAddress, setOriginAddress] = useState("");
   const [destinationAddress, setDestinationAddress] = useState("");
   const [originPoint, setOriginPoint] = useState<AddressResult | null>(null);
@@ -1355,6 +1360,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
     useState<AddressResult | null>(null);
   const [locationStatus, setLocationStatus] = useState("");
   const [gpsBusy, setGpsBusy] = useState(false);
+  const gpsRequestRef = useRef(0);
   const [deviceLocation, setDeviceLocation] = useState<LivePoint>();
   const [gpsAccuracy, setGpsAccuracy] = useState<number>();
   const [gpsTrackingEnabled, setGpsTrackingEnabled] = useState(false);
@@ -1529,6 +1535,32 @@ function PassengerPanel({ backend }: { backend: Backend }) {
     backend.completedRide && !backend.activeRide
       ? "finished"
       : rideStage(ride, Boolean(estimate));
+  const selectedService = getRideService(stage === "draft" || stage === "quote" ? serviceType : ride?.service_type);
+  const isDelivery = selectedService.id !== "passenger";
+  const pickupLabel = isDelivery ? "Local de retirada" : "Onde você está?";
+  const dropoffLabel = isDelivery ? "Local de entrega" : "Para onde você vai?";
+
+  function changeService(next: RideServiceType) {
+    if (next === serviceType || rideRequestInFlight.current) return;
+    quoteRequestRef.current += 1;
+    setServiceType(next);
+    serviceTypeRef.current = next;
+    setServiceDetails({});
+    setEstimate(null);
+    setBusy(false);
+    setNearbyDrivers([]);
+    setNearbyArrivalSeconds(null);
+    // Uma localização de embarque nunca vira retirada de pedido por acidente.
+    if ((next === "passenger") !== (serviceType === "passenger")) {
+      setOriginPoint(null);
+      setOriginAddress("");
+      setDestinationPoint(null);
+      setDestinationAddress("");
+      setSelectedQuickPlace(null);
+    }
+    setNotice("");
+    setSheetMode("expanded");
+  }
   useEffect(() => {
     if (stage !== "arrived" || !ride?.id) return;
     const key = `motopombal:arrival-alert:${ride.id}`;
@@ -1710,7 +1742,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   const trackingDistance = liveTracking?.distanceMeters ?? (pickupStage && freshDriver ? driverLocation.distanceToOriginMeters : null);
   const driverApproaching = stage === "accepted" && trackingDistance != null && trackingDistance <= 180;
   const trackingTitle = stage === "arrived" ? "Motorista no local" : driverApproaching ? "Motorista chegando" : tripStage ? "A caminho do destino" : "Motorista a caminho";
-  const trackingDetail = stage === "arrived" ? "Aguardando o embarque" : liveTracking
+  const trackingDetail = stage === "arrived" ? isDelivery ? "Aguardando a retirada do pedido" : "Aguardando o embarque" : liveTracking
     ? `${(liveTracking.distanceMeters / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km • ${minutes(liveTracking.durationSeconds)} min`
     : "Atualizando trajeto";
   const routeGeometry = stage === "arrived" ? undefined : trackingPhaseNow ? liveTracking?.geometry : ride?.route_geometry || estimate?.geometry;
@@ -1776,10 +1808,10 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   useEffect(() => {
     if (!destinationSearchOpen) return;
     const frame = window.requestAnimationFrame(() =>
-      document.getElementById("destination-search-address")?.focus(),
+      document.getElementById(isDelivery && !originPoint ? "origin-search-address" : "destination-search-address")?.focus(),
     );
     return () => window.cancelAnimationFrame(frame);
-  }, [destinationSearchOpen]);
+  }, [destinationSearchOpen, isDelivery, originPoint]);
 
   function changeSheetByDrag(clientY: number) {
     const start = sheetDragStart.current;
@@ -1810,10 +1842,20 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   }
 
   async function requestCurrentLocation() {
+    const requestId = ++gpsRequestRef.current;
+    const quoteGeneration = ++quoteRequestRef.current;
+    const requestedService = serviceTypeRef.current;
+    const isCurrent = () => requestId === gpsRequestRef.current &&
+      quoteGeneration === quoteRequestRef.current && serviceTypeRef.current === requestedService;
+    setBusy(false);
+    setEstimate(null);
+    setNearbyDrivers([]);
+    setNearbyArrivalSeconds(null);
     setNotice("");
     setGpsBusy(true);
     try {
       const result = await locateDevice();
+      if (!isCurrent()) return;
       setOriginPoint(result);
       setOriginAddress(result.address);
       setEstimate(null);
@@ -1825,6 +1867,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           : "Localização encontrada",
       );
     } catch (error) {
+      if (!isCurrent()) return;
       const message =
         error instanceof Error
           ? error.message
@@ -1833,15 +1876,18 @@ function PassengerPanel({ backend }: { backend: Backend }) {
       setNotice(message);
       setSheetMode("expanded");
     } finally {
-      setGpsBusy(false);
+      if (requestId === gpsRequestRef.current) setGpsBusy(false);
     }
   }
 
   useEffect(() => {
     if (!navigator.permissions?.query) return;
     let cancelled = false;
+    const quoteGeneration = quoteRequestRef.current;
+    const gpsGeneration = gpsRequestRef.current;
     void navigator.permissions.query({ name: "geolocation" }).then((permission) => {
-      if (cancelled || permission.state !== "granted") return;
+      if (cancelled || permission.state !== "granted" || quoteGeneration !== quoteRequestRef.current ||
+        gpsGeneration !== gpsRequestRef.current) return;
       void requestCurrentLocation();
     }).catch(() => undefined);
     return () => { cancelled = true; };
@@ -1850,10 +1896,12 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   }, []);
 
   async function centerOnCurrentLocation() {
+    const requestId = ++gpsRequestRef.current;
     setNotice("");
     setGpsBusy(true);
     try {
       const result = await locateDevice();
+      if (requestId !== gpsRequestRef.current) return;
       setLocationStatus("Mapa centralizado na localização atual");
       if (result.provider === "coordinates") {
         setNotice(
@@ -1861,6 +1909,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
         );
       }
     } catch (error) {
+      if (requestId !== gpsRequestRef.current) return;
       const message =
         error instanceof Error
           ? error.message
@@ -1868,7 +1917,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
       setLocationStatus(message);
       setNotice(message);
     } finally {
-      setGpsBusy(false);
+      if (requestId === gpsRequestRef.current) setGpsBusy(false);
     }
   }
 
@@ -1894,6 +1943,18 @@ function PassengerPanel({ backend }: { backend: Backend }) {
       state: "BA",
       approximate: false,
     };
+    if (isDelivery) {
+      quoteRequestRef.current += 1;
+      setBusy(false);
+      setOriginAddress(result.address);
+      setOriginPoint(result);
+      setEstimate(null);
+      setQuickPlacesOpen(false);
+      setDestinationSearchOpen(true);
+      setNotice(`${place.name} definido como local de retirada. Escolha o local de entrega.`);
+      if (destinationPoint) void calculate(destinationPoint, result);
+      return;
+    }
     setDestinationAddress(result.address);
     setDestinationPoint(result);
     setSelectedQuickPlace(place);
@@ -1949,7 +2010,13 @@ function PassengerPanel({ backend }: { backend: Backend }) {
       resolvedDestination?.address || destinationAddress.trim();
     if (!requestedDestination) {
       setBusy(false);
-      setNotice("Informe o destino.");
+      setNotice(isDelivery ? "Informe o local de entrega." : "Informe o destino.");
+      return;
+    }
+    if (isDelivery && !originOverride && !originPoint && !originAddress.trim()) {
+      setBusy(false);
+      setNotice("Informe o local onde o motorista deve retirar o pedido.");
+      setDestinationSearchOpen(true);
       return;
     }
     setEstimate(null);
@@ -1961,6 +2028,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
       let resolvedOrigin = originOverride || originPoint;
       if (!resolvedOrigin && !originAddress.trim()) {
         resolvedOrigin = await locateDevice();
+        if (requestId !== quoteRequestRef.current) return;
         setOriginPoint(resolvedOrigin);
         setOriginAddress(resolvedOrigin.address);
         setLocationStatus("Localização encontrada");
@@ -2034,6 +2102,13 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   }
   async function requestRide() {
     if (!estimate || rideRequestInFlight.current) return;
+    const service = rideServiceSchema.safeParse({ serviceType, serviceDetails });
+    if (!service.success) {
+      setNotice(service.error.issues[0]?.message || "Confira os dados da entrega.");
+      setSheetMode("expanded");
+      document.getElementById("delivery-request-details")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      return;
+    }
     rideRequestInFlight.current = true;
     setBusy(true);
     setNotice("");
@@ -2044,6 +2119,8 @@ function PassengerPanel({ backend }: { backend: Backend }) {
         paymentMethod,
         couponCode: estimate.coupon?.code,
         quoteToken: estimate.quoteToken,
+        serviceType: service.data.serviceType,
+        serviceDetails: service.data.serviceDetails,
       });
       setEstimate(null);
       setNearbyDrivers([]);
@@ -2146,13 +2223,13 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   const status =
     stage === "draft"
       ? [
-          "Pronto para ir?",
-          "Peça sua moto",
-          "Informe o destino para calcular sua corrida.",
+          isDelivery ? "O que vamos entregar?" : "Pronto para ir?",
+          isDelivery ? selectedService.label : "Peça sua moto",
+          isDelivery ? "Informe a retirada e a entrega para calcular o frete." : "Informe o destino para calcular sua corrida.",
         ]
       : stage === "quote"
         ? [
-            "Resumo da corrida",
+            isDelivery ? "Resumo da entrega" : "Resumo da corrida",
             "Tudo certo para chamar",
             "Preço e tempo calculados pela rota real.",
           ]
@@ -2172,16 +2249,16 @@ function PassengerPanel({ backend }: { backend: Backend }) {
               ? [
                   "Ele chegou",
                   "Seu MotoPombal está esperando",
-                  "Encontre o motorista no ponto de embarque.",
+                  isDelivery ? "O motorista está no local de retirada do pedido." : "Encontre o motorista no ponto de embarque.",
                 ]
               : stage === "finished"
                 ? [
-                    "Viagem concluída",
-                    "Corrida finalizada",
+                    isDelivery ? "Entrega concluída" : "Viagem concluída",
+                    isDelivery ? "Pedido entregue" : "Corrida finalizada",
                     "Resumo calculado e registrado pelo MotoPombal.",
                   ]
                 : [
-                    "Corrida em andamento",
+                    isDelivery ? "Entrega em andamento" : "Corrida em andamento",
                     "Rumo ao destino",
                     trackingEta?.phase === "trip"
                       ? `${minutes(trackingEta.durationSeconds)} min até o destino.`
@@ -2220,7 +2297,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
   }
   return (
     <div
-      className={`passenger-shell passenger-stage-${stage} sheet-${sheetMode}`}
+      className={`passenger-shell passenger-stage-${stage} sheet-${sheetMode}${isDelivery ? " service-delivery" : ""}`}
     >
       <section className="passenger-map">
         <MapCanvas
@@ -2287,9 +2364,10 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             );
           }}
         />
+        {(stage === "draft" || stage === "quote") && <RideServicePicker value={serviceType} onChange={changeService} disabled={busy} />}
         {stage === "draft" && <div className="passenger-home-sheet">
-          <h1>Para onde vamos?</h1>
-          <button type="button" className="passenger-home-search" onClick={() => setDestinationSearchOpen(true)}><Search /><span>Digite seu destino</span><ChevronRight /></button>
+          <h1>{isDelivery ? "O que vamos entregar?" : "Para onde vamos?"}</h1>
+          <button type="button" className="passenger-home-search" onClick={() => setDestinationSearchOpen(true)}><Search /><span>{isDelivery ? "Definir retirada e entrega" : "Digite seu destino"}</span><ChevronRight /></button>
           <div className="passenger-home-saved" aria-label="Lugares favoritos">
             {(["home", "work"] as const).map((kind) => {
               const place = savedPlaces.find((item) => item.kind === kind);
@@ -2300,8 +2378,9 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             <button type="button" onClick={() => { setDestinationSearchOpen(true); }}><Star /><span>Favoritos</span></button>
             <button type="button" onClick={() => setDestinationSearchOpen(true)}><History /><span>Recentes</span></button>
           </div>
-          {!!featuredQuickPlaces.length && <><div className="passenger-home-points-heading"><b>Pontos da cidade</b><button type="button" onClick={() => setQuickPlacesOpen(true)}>Ver mais <ChevronRight /></button></div><div className="passenger-home-points">{featuredQuickPlaces.map((place) => <button type="button" key={place.id} onClick={() => chooseQuickPlace(place)}><QuickPlaceIcon name={place.icon} /><span>{place.name}</span></button>)}</div></>}
+          {!!featuredQuickPlaces.length && <><div className="passenger-home-points-heading"><b>{isDelivery ? "Onde retirar?" : "Pontos da cidade"}</b><button type="button" onClick={() => setQuickPlacesOpen(true)}>Ver mais <ChevronRight /></button></div><div className="passenger-home-points">{featuredQuickPlaces.map((place) => <button type="button" key={place.id} onClick={() => chooseQuickPlace(place)}><QuickPlaceIcon name={place.icon} /><span>{place.name}</span></button>)}</div></>}
         </div>}
+        {(stage === "draft" || stage === "quote") && isDelivery && <div id="delivery-request-details"><DeliveryDetailsForm serviceType={serviceType} value={serviceDetails} onChange={setServiceDetails} disabled={busy} /></div>}
         {(stage === "draft" || stage === "quote") && (
           <div className="motovip-booking">
             <div className="motovip-address-card">
@@ -2309,15 +2388,15 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                 <button
                   type="button"
                   className="motovip-address-pickup"
-                  onClick={() => void requestCurrentLocation()}
+                  onClick={() => isDelivery ? setDestinationSearchOpen(true) : void requestCurrentLocation()}
                   disabled={gpsBusy}
-                  aria-label="Usar minha localização atual como origem"
+                  aria-label={isDelivery ? "Escolher local de retirada" : "Usar minha localização atual como origem"}
                   aria-busy={gpsBusy}
                 >
                   <span className="motovip-address-icon origin"><Crosshair className={gpsBusy ? "is-spinning" : ""} /></span>
                   <span className="motovip-address-main">
-                    <small>Onde você está?</small>
-                    <b>{gpsBusy ? "Obtendo sua localização…" : originAddress || "Definir local de partida"}</b>
+                    <small>{pickupLabel}</small>
+                    <b>{gpsBusy ? "Obtendo sua localização…" : originAddress || (isDelivery ? "Definir retirada do pedido" : "Definir local de partida")}</b>
                   </span>
                 </button>
                 <button type="button" className="motovip-address-action" aria-label="Limpar origem" onClick={() => clearBookingPoint("origin")}><X /></button>
@@ -2325,7 +2404,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
               <div className="motovip-address-row">
                 <span className="motovip-address-icon destination"><MapPin /></span>
                 <button type="button" className="motovip-address-main" onClick={() => setDestinationSearchOpen(true)}>
-                  <small>Para onde você vai?</small>
+                  <small>{dropoffLabel}</small>
                   <b>{destinationAddress || "Escolher destino"}</b>
                 </button>
                 <button type="button" className="motovip-address-action" aria-label="Limpar destino" onClick={() => clearBookingPoint("destination")}><X /></button>
@@ -2347,7 +2426,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
               <ChevronRight />
             </button>
             <button className="motovip-request" type="button" disabled={busy || backend.profile?.blocked} onClick={() => estimate ? void requestRide() : destinationPoint || destinationAddress ? void calculate() : setDestinationSearchOpen(true)}>
-              <Bike /><span><b>{busy ? "Aguarde…" : "Chamar Moto"}</b><small>{estimate ? "Confirmar e solicitar corrida" : "Escolha o destino para continuar"}</small></span>
+              <Bike /><span><b>{busy ? "Aguarde…" : isDelivery ? "Pedir entrega" : "Chamar Moto"}</b><small>{estimate ? isDelivery ? "Confirmar e solicitar entrega" : "Confirmar e solicitar corrida" : isDelivery ? "Defina retirada e entrega para continuar" : "Escolha o destino para continuar"}</small></span>
             </button>
           </div>
         )}
@@ -2390,7 +2469,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                   >
                     <Search />
                     <span>
-                      <b>Para onde vamos?</b>
+                      <b>{isDelivery ? "Definir retirada e entrega" : "Para onde vamos?"}</b>
                       <small>Busque rua, número ou ponto conhecido</small>
                     </span>
                     <ChevronRight />
@@ -2534,7 +2613,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                     className="primary-cta progressive-request-cta"
                     onClick={() => void requestRide()}
                   >
-                    {busy ? "AGUARDE…" : "CHAMAR MOTO"}
+                    {busy ? "AGUARDE…" : isDelivery ? "PEDIR ENTREGA" : "CHAMAR MOTO"}
                     <ChevronRight />
                   </Button>
                 </div>
@@ -2544,7 +2623,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
               <AddressField
                 backend={backend}
                 icon={<MapPin />}
-                label="Onde você está?"
+                label={pickupLabel}
                 value={originAddress}
                 selected={originPoint}
                 onChange={(value) => {
@@ -2571,7 +2650,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
               <AddressField
                 backend={backend}
                 icon={<Navigation />}
-                label="Para onde você vai?"
+                label={dropoffLabel}
                 value={destinationAddress}
                 selected={destinationPoint}
                 onChange={(value) => {
@@ -2694,8 +2773,8 @@ function PassengerPanel({ backend }: { backend: Backend }) {
               {busy
                 ? "AGUARDE…"
                 : estimate
-                  ? "PEDIR MOTO"
-                  : "VER VALOR DA CORRIDA"}
+                  ? isDelivery ? "PEDIR ENTREGA" : "PEDIR MOTO"
+                  : isDelivery ? "VER VALOR DO FRETE" : "VER VALOR DA CORRIDA"}
               <ChevronRight />
             </Button>
             {stage === "draft" && (
@@ -2746,6 +2825,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
         )}
         {stage === "searching" && (
           <div className="searching-content">
+            {ride && <RideServiceSummary ride={ride} compact />}
             <div className="finding-riders">
               <span>
                 <Bike />
@@ -2778,6 +2858,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
         )}
         {stage === "finished" && ride && (
           <div className="completion-card">
+            <RideServiceSummary ride={ride} compact />
             <div className="completion-check">
               <Check />
             </div>
@@ -2870,7 +2951,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
         {["accepted", "arrived", "riding"].includes(stage) && ride && (
           <>
             <div className="passenger-tracking-header" role="status">
-              <div><h2>{stage === "arrived" ? "Seu motorista chegou" : driverApproaching ? "Seu motorista está chegando" : tripStage ? "Você está a caminho do destino" : "Seu motorista está a caminho"}</h2><p>{stage === "arrived" ? "Está aguardando no ponto de embarque" : tripStage ? "Acompanhe sua rota em tempo real" : "Acompanhe em tempo real"}</p></div>
+              <div><h2>{stage === "arrived" ? "Seu motorista chegou" : driverApproaching ? "Seu motorista está chegando" : tripStage ? isDelivery ? "Seu pedido está a caminho" : "Você está a caminho do destino" : "Seu motorista está a caminho"}</h2><p>{stage === "arrived" ? isDelivery ? "Aguardando a retirada do pedido" : "Está aguardando no ponto de embarque" : tripStage ? "Acompanhe sua rota em tempo real" : "Acompanhe em tempo real"}</p></div>
               <div className="passenger-tracking-eta"><Clock3 /><span><b>{stage === "arrived" ? "0 min" : liveTracking ? `${minutes(liveTracking.durationSeconds)} min` : "—"}</b><small>{stage === "arrived" ? "Muito próximo" : liveTracking ? `${(liveTracking.distanceMeters / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km de distância` : "Atualizando rota"}</small></span></div>
             </div>
             <div className="driver-card passenger-driver-card">
@@ -2920,14 +3001,15 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                 {stage !== "riding" && <button type="button" disabled={busy} aria-label="Cancelar corrida" onClick={() => setCancelConfirmOpen(true)}><X /><small>Cancelar</small></button>}
               </div>
             </div>
+            <RideServiceSummary ride={ride} compact />
             <div className="passenger-tracking-timeline" aria-label="Etapas da corrida">
               <div className="done"><span><Check /></span><b>Solicitação</b><small>{shortRideTime(ride.requested_at || ride.created_at)}</small></div>
               <div className="line done" />
-              <div className={tripStage ? "done" : "active"}><span>{tripStage ? <Check /> : "2"}</span><b>{tripStage || stage === "arrived" ? "Embarque" : "Motorista a caminho"}</b><small>{shortRideTime(tripStage ? ride.started_at : stage === "arrived" ? ride.arrived_at : ride.accepted_at)}</small></div>
+              <div className={tripStage ? "done" : "active"}><span>{tripStage ? <Check /> : "2"}</span><b>{tripStage || stage === "arrived" ? isDelivery ? "Retirada" : "Embarque" : "Motorista a caminho"}</b><small>{shortRideTime(tripStage ? ride.started_at : stage === "arrived" ? ride.arrived_at : ride.accepted_at)}</small></div>
               <div className={`line ${tripStage ? "done" : ""}`} />
-              <div className={tripStage ? "active" : "upcoming"}><span>3</span><b>{tripStage ? "A caminho do destino" : stage === "arrived" ? "Destino" : "Embarque"}</b><small>{tripStage ? shortRideTime(ride.started_at) : ""}</small></div>
+              <div className={tripStage ? "active" : "upcoming"}><span>3</span><b>{tripStage ? "A caminho do destino" : stage === "arrived" ? isDelivery ? "Entrega" : "Destino" : isDelivery ? "Retirada" : "Embarque"}</b><small>{tripStage ? shortRideTime(ride.started_at) : ""}</small></div>
             </div>
-            {stage === "arrived" && <div className="passenger-arrival-note" role="status"><Clock3 /><span><b>Motorista no local</b><small>Motorista aguardando no ponto de embarque</small></span></div>}
+            {stage === "arrived" && <div className="passenger-arrival-note" role="status"><Clock3 /><span><b>Motorista no local</b><small>{isDelivery ? "Motorista aguardando no local de retirada" : "Motorista aguardando no ponto de embarque"}</small></span></div>}
             {trackingEtaError && !liveTracking && <p className="passenger-tracking-feedback" role="status">{trackingEtaError}</p>}
           </>
         )}
@@ -2964,6 +3046,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                       </strong>
                     </summary>
                     <div>
+                      <RideServiceSummary ride={item} compact />
                       <p>
                         {item.origin_address} → {item.destination_address}
                       </p>
@@ -3100,8 +3183,8 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             </button>
             <Image className="destination-header-logo" src="/brand/motopombal-wordmark.png" alt="MotoPombal" width={144} height={72} />
             <div className="destination-header-copy">
-              <h2 id="destination-search-title">Selecionar destino</h2>
-              <p>Para onde você quer ir?</p>
+              <h2 id="destination-search-title">{isDelivery ? "Retirada e entrega" : "Selecionar destino"}</h2>
+              <p>{isDelivery ? "Onde buscar e onde entregar o pedido?" : "Para onde você quer ir?"}</p>
             </div>
             <button
               className="destination-header-map"
@@ -3116,21 +3199,26 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             <AddressField
               backend={backend}
               icon={<Crosshair />}
-              label="Origem"
+              label={isDelivery ? "Local de retirada" : "Origem"}
               value={originAddress}
               selected={originPoint}
               onChange={(value) => {
+                quoteRequestRef.current += 1;
+                setBusy(false);
                 setOriginAddress(value);
                 setOriginPoint(null);
                 setEstimate(null);
               }}
               onSelect={(result) => {
+                quoteRequestRef.current += 1;
+                setBusy(false);
                 setOriginPoint(result);
                 setOriginAddress(result.address);
                 setEstimate(null);
                 setLocationStatus("Localização encontrada");
+                if (destinationPoint) void calculate(destinationPoint, result);
               }}
-              placeholder="Minha localização atual"
+              placeholder={isDelivery ? "Restaurante, loja ou endereço de retirada" : "Minha localização atual"}
               onUseGps={requestCurrentLocation}
               onOpenMap={() => {
                 setDestinationSearchOpen(false);
@@ -3142,10 +3230,12 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             <AddressField
               backend={backend}
               icon={<Search />}
-              label="Destino"
+              label={isDelivery ? "Local de entrega" : "Destino"}
               value={destinationAddress}
               selected={destinationPoint}
               onChange={(value) => {
+                quoteRequestRef.current += 1;
+                setBusy(false);
                 setDestinationAddress(value);
                 setDestinationPoint(null);
                 setSelectedQuickPlace(null);
@@ -3159,7 +3249,7 @@ function PassengerPanel({ backend }: { backend: Backend }) {
                     : "Destino selecionado",
                 )
               }
-              placeholder="Para onde vamos?"
+              placeholder={isDelivery ? "Endereço de quem recebe o pedido" : "Para onde vamos?"}
               onOpenMap={() => {
                 setDestinationSearchOpen(false);
                 setMapPicker("destination");
@@ -3312,9 +3402,15 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           onClose={() => setMapPicker(null)}
           onConfirm={(result) => {
             if (mapPicker === "origin") {
+              quoteRequestRef.current += 1;
+              setBusy(false);
+              setEstimate(null);
+              setNearbyDrivers([]);
+              setNearbyArrivalSeconds(null);
               setOriginPoint(result);
               setOriginAddress(result.address);
               setLocationStatus("Localização encontrada");
+              if (destinationPoint) void calculate(destinationPoint, result);
             } else {
               setMapPicker(null);
               chooseDestination(result, "Destino selecionado no mapa");
@@ -3355,6 +3451,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const pendingOfflineCount = offlinePackage?.offlineEvents.filter((event) => event.status !== "synced").length || 0;
   const driverId = backend.session?.user.id;
   const serverRide = backend.activeRide;
+  const serverRideId = serverRide?.id;
   const pendingLocalStatus = (!serverRide || offlinePackage?.ride.id === serverRide.id)
     && offlinePackage?.offlineEvents.some((event) => event.status !== "synced");
   const ride = useMemo(() => selectDriverRide({ serverRide, offlinePackage,
@@ -3365,6 +3462,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const localFinished = currentOfflinePackage?.navigationState === "finalizada" && pendingOfflineCount > 0;
   const completedRide = ride ? null : backend.completedRide;
   const offer = backend.offers[0];
+  const isDelivery = getRideService(ride?.service_type).id !== "passenger";
   const online = Boolean(state?.online);
   const hasActiveRide = Boolean(ride);
   const trackingGps = online || hasActiveRide;
@@ -3408,7 +3506,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
   useEffect(() => connectivityManager.subscribe(setConnectivity), []);
   useEffect(() => {
     if (!driverId || !pendingOfflineCount || connectivity === "OFFLINE" ||
-      (backend.activeRide && backend.activeRide.id !== offlinePackage?.ride.id)) return;
+      (serverRideId && serverRideId !== offlinePackage?.ride.id)) return;
     let cancelled = false;
     const synchronize = () => {
       if (syncInFlightRef.current) return;
@@ -3434,7 +3532,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
     const timer = window.setTimeout(synchronize, 0);
     const interval = window.setInterval(synchronize, 15000);
     return () => { cancelled = true; window.clearTimeout(timer); window.clearInterval(interval); };
-  }, [driverId, pendingOfflineCount, connectivity, backend.activeRide?.id, offlinePackage?.ride.id]);
+  }, [driverId, pendingOfflineCount, connectivity, serverRideId, offlinePackage?.ride.id]);
   useEffect(() => {
     if (!driverId) return;
     let active = true;
@@ -3442,8 +3540,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
     return () => { active = false; };
   }, [driverId]);
   useEffect(() => {
-    if (backend.activeRide) setNotice((current) => current === "Corrida encerrada no servidor." ? "" : current);
-  }, [backend.activeRide?.id]);
+    if (serverRideId) setNotice((current) => current === "Corrida encerrada no servidor." ? "" : current);
+  }, [serverRideId]);
   useEffect(() => {
     if (!offlinePackage || busy ||
       (backend.cancelledRide?.id !== offlinePackage.ride.id && (!backend.rideSnapshotVerified || connectivity === "OFFLINE"))) return;
@@ -4003,8 +4101,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const arrivalReady = Boolean(ride?.status === "motorista_a_caminho" && liveLocation && navSample &&
     navSample.accuracy <= 40 && distanceToTarget <= backend.cancellationPolicy.arrival_radius_meters);
   const navDestination = useMemo(() => targetLat !== undefined && targetLng !== undefined
-    ? { lat: targetLat, lng: targetLng, label: navPhase === "pickup" ? "Passageiro" : "Destino" }
-    : undefined, [targetLat, targetLng, navPhase]);
+    ? { lat: targetLat, lng: targetLng, label: navPhase === "pickup" ? isDelivery ? "Retirada" : "Passageiro" : isDelivery ? "Entrega" : "Destino" }
+    : undefined, [targetLat, targetLng, navPhase, isDelivery]);
   const navMap = useMemo(() => liveLocation ? {
     position: liveLocation,
     heading: navSample?.heading ?? null,
@@ -4061,7 +4159,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
     if (!voiceOn || !ride || !navSample || gpsWeak || !("speechSynthesis" in window)) return;
     const closeToPickup = navPhase === "pickup" && distanceToTarget <= 45 && ride.status !== "motorista_chegou";
     const message = closeToPickup
-      ? "Você chegou ao local do passageiro"
+      ? isDelivery ? "Você chegou ao local de retirada" : "Você chegou ao local do passageiro"
       : upcomingManeuver && upcomingManeuver.distanceMeters <= 220
         ? `${upcomingManeuver.distanceMeters <= 55 ? "Agora, " : `Em ${Math.round(upcomingManeuver.distanceMeters / 10) * 10} metros, `}${maneuverText(upcomingManeuver.step).replace(" — ", " na ")}`
         : "";
@@ -4074,7 +4172,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
     utterance.lang = "pt-BR";
     utterance.rate = 0.95;
     window.speechSynthesis.speak(utterance);
-  }, [voiceOn, ride, navPhase, navSample, gpsWeak, distanceToTarget, upcomingManeuver]);
+  }, [voiceOn, ride, navPhase, navSample, gpsWeak, distanceToTarget, upcomingManeuver, isDelivery]);
   useEffect(() => () => window.speechSynthesis?.cancel(), []);
   useEffect(() => {
     alertControllerRef.current ||= new RideAlertController();
@@ -4836,6 +4934,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
                         <span className="driver-history-date">{new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium" }).format(new Date(item.completed_at || item.created_at))}</span>
                         <b>{money(item.final_fare_cents ?? item.fare_cents)}</b>
                         <strong>{item.passenger_name || "Passageiro não informado"}</strong>
+                        <RideServiceSummary ride={item} compact />
                         <small>{rideStatusLabel(item.status)} · {(item.final_fare_cents ?? item.fare_cents) === 0 ? "Gratuita · Quitada" : `${item.payment?.method === "cash" ? "Dinheiro" : "Pix"} · ${paymentLabel(item.payment?.status)}`}</small>
                         {item.payment?.method === "cash" && item.payment.status === "aguardando_pagamento" && <button type="button" disabled={cashBusyRide === item.id} onClick={() => void confirmDriverCash(item.id)}>{cashBusyRide === item.id ? "Confirmando…" : "Confirmar recebimento em dinheiro"}</button>}
                       </div>
@@ -4870,7 +4969,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
           <section className="driver-navigation" aria-label="Navegação da corrida">
             <div className="driver-nav-top">
               <div className="driver-nav-toolbar">
-                <div className="driver-nav-stage">{ride.status === "aceita" ? "PREPARANDO NAVEGAÇÃO" : ride.status === "motorista_chegou" ? "AGUARDANDO PASSAGEIRO" : navPhase === "pickup" ? "INDO BUSCAR PASSAGEIRO" : "LEVANDO AO DESTINO"}</div>
+                <div className="driver-nav-stage">{ride.status === "aceita" ? "PREPARANDO NAVEGAÇÃO" : ride.status === "motorista_chegou" ? isDelivery ? "AGUARDANDO RETIRADA" : "AGUARDANDO PASSAGEIRO" : navPhase === "pickup" ? isDelivery ? "INDO RETIRAR PEDIDO" : "INDO BUSCAR PASSAGEIRO" : isDelivery ? "LEVANDO A ENTREGA" : "LEVANDO AO DESTINO"}</div>
                 {connectivity !== "ONLINE" && <span className={`driver-nav-connection ${connectivity.toLowerCase()}`} role="status">{connectivity === "OFFLINE" ? navigator.onLine ? "Servidor indisponível" : "Navegação offline" : connectivity === "RECOVERING" ? "Reconectando…" : "Conexão fraca"}</span>}
                 <button type="button" className="driver-nav-exit" onClick={() => { setDriverView("menu"); setMenuOpen(true); }} aria-label="Abrir menu do motorista"><Menu /></button>
               </div>
@@ -4878,7 +4977,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
                 <span className="driver-nav-arrow" aria-hidden="true">{maneuverSymbol(gpsWeak ? undefined : upcomingManeuver?.step)}</span>
                 <div>
                   <strong>{ride.status === "motorista_chegou" ? "Você chegou" : gpsWeak ? navEta ? "Rota de referência" : "Aguardando localização" : distanceToTarget <= 45 ? "Local de chegada próximo" : upcomingManeuver ? `Em ${formatNavDistance(upcomingManeuver.distanceMeters)}` : "Siga pela rota"}</strong>
-                  <span>{ride.status === "motorista_chegou" ? "Aguarde o embarque" : !gpsWeak && upcomingManeuver ? maneuverText(upcomingManeuver.step) : navPhase === "pickup" ? ride.origin_address : ride.destination_address}</span>
+                  <span>{ride.status === "motorista_chegou" ? isDelivery ? "Aguarde a retirada do pedido" : "Aguarde o embarque" : !gpsWeak && upcomingManeuver ? maneuverText(upcomingManeuver.step) : navPhase === "pickup" ? ride.origin_address : ride.destination_address}</span>
                 </div>
                 <button type="button" className="driver-nav-sound" aria-label={voiceOn ? "Desligar som" : "Ligar som"} aria-pressed={voiceOn} onClick={() => {
                   if (voiceOn) window.speechSynthesis?.cancel();
@@ -4890,12 +4989,12 @@ function DriverPanel({ backend }: { backend: Backend }) {
                 <span>{rerouting ? "Recalculando rota…" : gpsWeak ? gpsAlert : locationSyncError || trackingEtaError}</span>
                 {gpsWeak && <button type="button" onClick={retryGps} disabled={gpsRetrying}>{gpsRetrying ? "Buscando GPS…" : "Tentar GPS"}</button>}
               </div>}
-              {mapTilesUnavailable && connectivity !== "OFFLINE" && <div className="driver-nav-alert" role="status">O mapa de ruas não carregou. Use outro mapa para seguir até {navPhase === "pickup" ? "o passageiro" : "o destino"} enquanto tentamos recuperar a conexão.</div>}
+              {mapTilesUnavailable && connectivity !== "OFFLINE" && <div className="driver-nav-alert" role="status">O mapa de ruas não carregou. Use outro mapa para seguir até {navPhase === "pickup" ? isDelivery ? "o local de retirada" : "o passageiro" : "o destino"} enquanto tentamos recuperar a conexão.</div>}
             </div>
             <div className="driver-nav-floats">
               <button type="button" aria-label={voiceOn ? "Desligar orientação por voz" : "Ligar orientação por voz"} onClick={() => { if (voiceOn) window.speechSynthesis?.cancel(); announcedRef.current.clear(); setVoiceOn(!voiceOn); }}>{voiceOn ? <Volume2 /> : <VolumeX />}</button>
-              <button type="button" aria-label="Mensagem ao passageiro" onClick={() => setContactOpen(true)}><MessageCircle /></button>
-              {ride.passenger?.phone && <a href={`tel:${ride.passenger.phone}`} aria-label="Ligar para o passageiro"><Phone /></a>}
+              <button type="button" aria-label={isDelivery ? "Mensagem ao solicitante" : "Mensagem ao passageiro"} onClick={() => setContactOpen(true)}><MessageCircle /></button>
+              {ride.passenger?.phone && <a href={`tel:${ride.passenger.phone}`} aria-label={isDelivery ? "Ligar para o solicitante" : "Ligar para o passageiro"}><Phone /></a>}
             </div>
             <button type="button" className={`driver-nav-center ${followDriver ? "is-following" : ""}`} aria-label="Centralizar mapa no motorista" onClick={() => {
               setFollowDriver(true);
@@ -4905,21 +5004,22 @@ function DriverPanel({ backend }: { backend: Backend }) {
               <div className="driver-nav-summary">
                 <strong>{gpsWeak ? navEta ? "Rota de referência" : "Obtendo localização…" : navEta ? `${minutes(Math.round(navEta.durationSeconds * Math.min(1, (navigationProgress?.remainingMeters ?? navEta.distanceMeters) / Math.max(1, navEta.distanceMeters))))} min` : "Calculando…"}</strong>
                 <span>{gpsWeak ? navEta ? `${formatNavDistance(navEta.distanceMeters)} desde a última posição conhecida; aguarde GPS atual.` : gpsAlert : navEta ? formatNavDistance(navigationProgress?.remainingMeters ?? navEta.distanceMeters) : trackingEtaError || "Calculando rota…"}</span>
-                <span>{ride.status === "aceita" ? "Corrida aceita · preparando rota" : ride.status === "motorista_chegou" ? "Aguardando passageiro" : navPhase === "pickup" ? "Indo buscar o passageiro" : "Em corrida para o destino"}</span>
+                <span>{ride.status === "aceita" ? "Solicitação aceita · preparando rota" : ride.status === "motorista_chegou" ? isDelivery ? "Aguardando a retirada" : "Aguardando passageiro" : navPhase === "pickup" ? isDelivery ? "Indo retirar o pedido" : "Indo buscar o passageiro" : isDelivery ? "Em entrega para o destino" : "Em corrida para o destino"}</span>
               </div>
+              {isDelivery && <details className="driver-delivery-details"><summary>Ver dados da entrega e destinatário</summary><RideServiceSummary ride={ride} compact /></details>}
               {navPhase === "trip" && connectivity === "ONLINE" && Number(ride.tracked_distance_meters) > 0 && <div className="driver-nav-trip">Percorrido pelo GPS: {(Number(ride.tracked_distance_meters) / 1000).toFixed(2).replace(".", ",")} km</div>}
               <div className="driver-nav-actions">
                 <button type="button" className="driver-nav-primary"
                   disabled={busy}
-                  onClick={advance}>{ride.status === "aceita" ? "Ir até passageiro" : ride.status === "motorista_a_caminho" ? "Cheguei" : ride.status === "motorista_chegou" ? "Iniciar corrida" : "Finalizar corrida"}</button>
+                  onClick={advance}>{ride.status === "aceita" ? isDelivery ? "Ir até retirada" : "Ir até passageiro" : ride.status === "motorista_a_caminho" ? "Cheguei" : ride.status === "motorista_chegou" ? isDelivery ? "Retirei o pedido" : "Iniciar corrida" : isDelivery ? "Confirmar entrega" : "Finalizar corrida"}</button>
               </div>
               {ride.status !== "em_corrida" && <button type="button" className="driver-nav-fallback" disabled={busy} onClick={() => setCancelStep(1)}>Cancelar corrida</button>}
               {ride.status === "em_corrida" && <button type="button" className="driver-nav-fallback" disabled={busy} onClick={() => setEarlyEndOpen(true)}>Encerrar viagem antecipadamente</button>}
               {ride.status === "motorista_a_caminho" && distanceToTarget > backend.cancellationPolicy.arrival_radius_meters &&
-                <p className="driver-nav-notice">Chegue a até {backend.cancellationPolicy.arrival_radius_meters} m do embarque para confirmar.</p>}
+                <p className="driver-nav-notice">Chegue a até {backend.cancellationPolicy.arrival_radius_meters} m {isDelivery ? "do local de retirada" : "do embarque"} para confirmar.</p>}
               {ride.status === "motorista_a_caminho" && distanceToTarget <= backend.cancellationPolicy.arrival_radius_meters && !arrivalReady &&
                 <p className="driver-nav-notice">Para confirmar chegada, aguarde GPS recente com precisão de até 40 m.</p>}
-              {ride.status === "motorista_chegou" && noShowRemaining !== null &&
+              {!isDelivery && ride.status === "motorista_chegou" && noShowRemaining !== null &&
                 <div className="driver-waiting"><span>Esperando passageiro · {String(Math.floor(noShowRemaining / 60)).padStart(2,"0")}:{String(noShowRemaining % 60).padStart(2,"0")}</span>
                   <button type="button" disabled={busy || noShowRemaining > 0} onClick={() => setNoShowConfirmOpen(true)}>Passageiro não apareceu</button></div>}
               {(!navEta || gpsWeak || mapTilesUnavailable) && navigationTarget && <button type="button" className="driver-nav-fallback" onClick={() => window.open(navigationTarget.url, "_blank", "noopener,noreferrer")}>Abrir rota em outro mapa</button>}
@@ -4952,7 +5052,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
             {cancelStep === 1 ? <>
               <p>Informe o motivo do cancelamento. O passageiro continuará procurando outro motorista.</p>
               <div className="driver-cancel-reasons" role="radiogroup" aria-label="Motivo do cancelamento">
-                {DRIVER_CANCEL_REASONS.map((item) => <label key={item.code}><input type="radio" name="driver-cancel-reason" value={item.code} checked={cancelReason === item.code} disabled={item.code === "no_show" && (ride.status !== "motorista_chegou" || !ride.arrival_verified || noShowRemaining === null || noShowRemaining > 0)} onChange={() => setCancelReason(item.code)} />{item.label}</label>)}
+                {DRIVER_CANCEL_REASONS.filter((item) => !isDelivery || item.code !== "no_show").map((item) => <label key={item.code}><input type="radio" name="driver-cancel-reason" value={item.code} checked={cancelReason === item.code} disabled={item.code === "no_show" && (ride.status !== "motorista_chegou" || !ride.arrival_verified || noShowRemaining === null || noShowRemaining > 0)} onChange={() => setCancelReason(item.code)} />{item.label}</label>)}
               </div>
               {cancelReason === "other" && <label className="driver-cancel-other">Descreva o motivo<textarea value={cancelOther} maxLength={300} onChange={(event) => setCancelOther(event.target.value)} /></label>}
               <div className="driver-contact-actions"><button type="button" onClick={() => setCancelStep(0)}>Voltar</button><button type="button" disabled={!cancelReason || (cancelReason === "other" && !cancelOther.trim()) || busy} onClick={() => {
@@ -5015,16 +5115,17 @@ function DriverPanel({ backend }: { backend: Backend }) {
           <div className="offer-card">
             <div className="offer-head">
               <div>
-                <span>NOVA CORRIDA</span>
+                <span>{getRideService(offer.ride.service_type).id === "passenger" ? "NOVA CORRIDA" : `NOVA ENTREGA · ${getRideService(offer.ride.service_type).label.toUpperCase()}`}</span>
                 <h2>{offer.passenger_name}</h2>
               </div>
               <b>{offerSeconds}s</b>
             </div>
+            <RideServiceSummary ride={offer.ride} compact />
             <div className="offer-route">
               <div>
                 <span className="pickup-dot" />
                 <p>
-                  <small>BUSCAR</small>
+                  <small>{getRideService(offer.ride.service_type).id === "passenger" ? "BUSCAR" : "RETIRADA"}</small>
                   <b>{offer.ride.origin_address}</b>
                 </p>
               </div>
@@ -5032,7 +5133,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
               <div>
                 <span className="drop-dot" />
                 <p>
-                  <small>DESTINO</small>
+                  <small>{getRideService(offer.ride.service_type).id === "passenger" ? "DESTINO" : "ENTREGA"}</small>
                   <b>{offer.ride.destination_address}</b>
                 </p>
               </div>
@@ -5053,7 +5154,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
                 RECUSAR
               </Button>
               <Button disabled={busy} onClick={accept}>
-                ACEITAR CORRIDA
+                {getRideService(offer.ride.service_type).id === "passenger" ? "ACEITAR CORRIDA" : "ACEITAR ENTREGA"}
               </Button>
             </div>
           </div>
@@ -5061,7 +5162,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
         {completedRide && !offer && (
           <div className="completion-card driver-completion-card">
             <div className="completion-check"><Check /></div>
-            <h2>Corrida finalizada!</h2>
+            <h2>{getRideService(completedRide.service_type).id === "passenger" ? "Corrida finalizada!" : "Entrega concluída!"}</h2>
+            <RideServiceSummary ride={completedRide} compact />
             {queuePosition && <p className="driver-queue-return">Você retornou automaticamente para a fila. Nova posição: <b>{queuePosition}º</b>. {queue?.ahead} {queue?.ahead === 1 ? "motorista está" : "motoristas estão"} na sua frente.</p>}
             <div className="completion-route">
               <span>{completedRide.origin_address}</span>
@@ -5081,10 +5183,10 @@ function DriverPanel({ backend }: { backend: Backend }) {
           <div className="active-job-card">
             <span className="job-kicker">
               {ride.status === "motorista_chegou"
-                ? "NO LOCAL DE EMBARQUE"
+                ? isDelivery ? "NO LOCAL DE RETIRADA" : "NO LOCAL DE EMBARQUE"
                 : ride.status === "em_corrida"
-                  ? "CORRIDA EM ANDAMENTO"
-                  : "VÁ ATÉ O PASSAGEIRO"}
+                  ? isDelivery ? "ENTREGA EM ANDAMENTO" : "CORRIDA EM ANDAMENTO"
+                  : isDelivery ? "VÁ ATÉ O LOCAL DE RETIRADA" : "VÁ ATÉ O PASSAGEIRO"}
             </span>
             <div className="passenger-row">
               <div className="passenger-avatar">
@@ -5092,24 +5194,25 @@ function DriverPanel({ backend }: { backend: Backend }) {
               </div>
               <div>
                 <b>{ride.passenger?.full_name || "Passageiro"}</b>
-                <small>Corrida protegida</small>
+                <small>{isDelivery ? `Solicitante · ${getRideService(ride.service_type).label}` : "Corrida protegida"}</small>
               </div>
               {ride.passenger?.phone && (
                 <a href={`tel:${ride.passenger.phone}`} aria-label="Ligar">
                   <Phone />
                 </a>
               )}
-              <button type="button" aria-label="Contato com passageiro" onClick={() => { setGpsExpanded(true); setContactOpen(true); }}>
+              <button type="button" aria-label={isDelivery ? "Contato com solicitante" : "Contato com passageiro"} onClick={() => { setGpsExpanded(true); setContactOpen(true); }}>
                 <MessageCircle />
               </button>
             </div>
+            <RideServiceSummary ride={ride} compact />
             <div className="job-address">
               <Navigation />
               <div>
                 <small>
                   {ride.status === "em_corrida"
                     ? "DESTINO"
-                    : "LOCAL DE EMBARQUE"}
+                    : isDelivery ? "LOCAL DE RETIRADA" : "LOCAL DE EMBARQUE"}
                 </small>
                 <b>
                   {ride.status === "em_corrida"
@@ -5155,12 +5258,12 @@ function DriverPanel({ backend }: { backend: Backend }) {
               {ride.status === "em_corrida" && <Button disabled={busy} variant="outline" onClick={() => setEarlyEndOpen(true)}>ENCERRAR ANTECIPADAMENTE</Button>}
               <Button disabled={busy} className="primary-cta" onClick={advance}>
                 {ride.status === "aceita"
-                  ? "IR ATÉ PASSAGEIRO"
+                  ? isDelivery ? "IR ATÉ RETIRADA" : "IR ATÉ PASSAGEIRO"
                   : ride.status === "motorista_a_caminho"
                     ? "CHEGUEI"
                     : ride.status === "motorista_chegou"
-                      ? "INICIAR CORRIDA"
-                      : "FINALIZAR CORRIDA"}
+                      ? isDelivery ? "RETIREI O PEDIDO" : "INICIAR CORRIDA"
+                      : isDelivery ? "CONFIRMAR ENTREGA" : "FINALIZAR CORRIDA"}
                 <ChevronRight />
               </Button>
             </div>
@@ -5173,1139 +5276,6 @@ function DriverPanel({ backend }: { backend: Backend }) {
           <button type="button" onClick={() => { setDriverView("support"); setMenuOpen(true); }}><Headphones />Suporte</button>
         </nav>}
       </main>
-    </div>
-  );
-}
-
-function AdminPanel({ backend }: { backend: Backend }) {
-  const stats = backend.adminStats;
-  const trips = stats?.recentRides || [];
-  const drivers = stats?.drivers || [];
-  const finance = backend.adminFinance;
-  const [busyId, setBusyId] = useState("");
-  const [notice, setNotice] = useState("");
-  const [dispatchModeChoice, setDispatchModeChoice] = useState<"round_robin" | "broadcast" | null>(null);
-  const selectedDispatchMode = dispatchModeChoice ?? backend.dispatchMode ?? "round_robin";
-  async function saveDispatchMode() {
-    setBusyId("dispatch");
-    setNotice("");
-    try {
-      await backend.saveDispatchMode(selectedDispatchMode);
-      await backend.refresh();
-      setDispatchModeChoice(null);
-      setNotice(selectedDispatchMode === "round_robin"
-        ? "Fila ativada. As próximas ofertas seguirão o rodízio."
-        : "Fila desativada. As próximas corridas serão oferecidas a todos os disponíveis.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Não foi possível salvar o modo de distribuição.");
-    } finally {
-      setBusyId("");
-    }
-  }
-  async function confirmAdminCash(rideId: string) {
-    setBusyId(rideId);
-    try {
-      await backend.confirmCashPayment(rideId);
-      await backend.refresh();
-      setNotice("Recebimento em dinheiro confirmado.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Não foi possível confirmar o recebimento.");
-    } finally {
-      setBusyId("");
-    }
-  }
-  const emptyQuickPlaceForm = {
-    id: "",
-    name: "",
-    address: "",
-    latitude: "",
-    longitude: "",
-    category: "generic" as QuickPlace["category"],
-    icon: "pin" as QuickPlace["icon"],
-    color: "#f2ad00",
-    active: true,
-    featured: false,
-    locationVerified: false,
-    sortOrder: String((backend.quickPlaces.length + 1) * 10),
-  };
-  const [quickPlaceForm, setQuickPlaceForm] = useState(emptyQuickPlaceForm);
-  const [quickPlaceMapOpen, setQuickPlaceMapOpen] = useState(false);
-  const [quickPlaceMapPoint, setQuickPlaceMapPoint] = useState<LivePoint>({
-    lat: -10.8373,
-    lng: -38.5357,
-    label: "Centro de Ribeira do Pombal",
-  });
-  const [quickPlaceOrder, setQuickPlaceOrder] = useState<string[] | null>(null);
-  const orderedQuickPlaces = quickPlaceOrder
-    ? quickPlaceOrder
-        .map((id) => backend.quickPlaces.find((place) => place.id === id))
-        .filter((place): place is QuickPlace => Boolean(place))
-    : backend.quickPlaces;
-  const [draggedPlaceId, setDraggedPlaceId] = useState("");
-  const [fareForm, setFareForm] = useState(() => {
-    const fare = backend.fareConfig;
-    return {
-      base: fare ? (fare.baseCents / 100).toFixed(2) : "",
-      perKm: fare ? (fare.perKmCents / 100).toFixed(2) : "",
-      perMinute: fare ? (fare.perMinuteCents / 100).toFixed(2) : "",
-      minimum: fare ? (fare.minimumCents / 100).toFixed(2) : "",
-    };
-  });
-  async function decide(driverId: string, status: "approved" | "rejected" | "blocked" | "pending") {
-    setBusyId(driverId);
-    setNotice("");
-    try {
-      await backend.approveDriver(driverId, status);
-      await backend.refresh();
-      setNotice(
-        { approved: "Motorista aprovado.", rejected: "Cadastro recusado.", blocked: "Motorista bloqueado.", pending: "Motorista desbloqueado; aguardando revisão." }[status],
-      );
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível atualizar o motorista.",
-      );
-    } finally {
-      setBusyId("");
-    }
-  }
-  async function saveFare(event: React.FormEvent) {
-    event.preventDefault();
-    setBusyId("fare");
-    setNotice("");
-    const toCents = (value: string) =>
-      Math.round(Number(value.replace(",", ".")) * 100);
-    const fare: FareConfig = {
-      baseCents: toCents(fareForm.base),
-      perKmCents: toCents(fareForm.perKm),
-      perMinuteCents: toCents(fareForm.perMinute),
-      minimumCents: toCents(fareForm.minimum),
-      configured: true,
-    };
-    try {
-      await backend.saveFareConfig(fare);
-      await backend.refresh();
-      setNotice("Estrutura futura de tarifa atualizada.");
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível salvar a tarifa.",
-      );
-    } finally {
-      setBusyId("");
-    }
-  }
-  async function saveRegion(
-    event: React.FormEvent<HTMLFormElement>,
-    region?: { id: string; is_default: boolean },
-  ) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const name = String(data.get("name") || "").trim();
-    const amountCents = Math.round(
-      Number(String(data.get("amount") || "").replace(",", ".")) * 100,
-    );
-    const active = region?.is_default || data.get("active") === "on";
-    const operation = `region-${region?.id || "new"}`;
-    setBusyId(operation);
-    setNotice("");
-    try {
-      await backend.saveFareRegion({
-        id: region?.id,
-        name,
-        amountCents,
-        active: Boolean(active),
-      });
-      await backend.refresh();
-      if (!region) form.reset();
-      setNotice(
-        region ? "Tarifa da região atualizada." : "Nova região cadastrada.",
-      );
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível salvar a região.",
-      );
-    } finally {
-      setBusyId("");
-    }
-  }
-  function openQuickPlaceMap() {
-    const latitude = Number(quickPlaceForm.latitude);
-    const longitude = Number(quickPlaceForm.longitude);
-    setQuickPlaceMapPoint(
-      Number.isFinite(latitude) && Number.isFinite(longitude)
-        ? { lat: latitude, lng: longitude, label: quickPlaceForm.name || "Ponto da cidade" }
-        : { lat: -10.8373, lng: -38.5357, label: "Centro de Ribeira do Pombal" },
-    );
-    setQuickPlaceMapOpen(true);
-  }
-  function confirmQuickPlaceMap() {
-    setQuickPlaceForm((current) => ({
-      ...current,
-      latitude: quickPlaceMapPoint.lat.toFixed(7),
-      longitude: quickPlaceMapPoint.lng.toFixed(7),
-      locationVerified: true,
-    }));
-    setQuickPlaceMapOpen(false);
-    setNotice("📍 Localização definida. As coordenadas do PIN serão a fonte oficial do destino.");
-  }
-  function editQuickPlace(place: QuickPlace) {
-    setQuickPlaceForm({
-      id: place.id,
-      name: place.name,
-      address: place.address,
-      latitude: String(place.latitude),
-      longitude: String(place.longitude),
-      category: place.category,
-      icon: place.icon,
-      color: place.color,
-      active: place.active,
-      featured: place.featured,
-      locationVerified: true,
-      sortOrder: String(place.sort_order),
-    });
-    document
-      .getElementById("quick-place-editor")
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-  async function saveQuickPlace(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!quickPlaceForm.locationVerified) {
-      setNotice("Defina a localização exata no mapa antes de salvar o ponto.");
-      return;
-    }
-    setBusyId("quick-place-save");
-    setNotice("");
-    try {
-      await backend.saveQuickPlace({
-        id: quickPlaceForm.id || undefined,
-        name: quickPlaceForm.name,
-        address: quickPlaceForm.address,
-        latitude: Number(quickPlaceForm.latitude),
-        longitude: Number(quickPlaceForm.longitude),
-        category: quickPlaceForm.category,
-        icon: quickPlaceForm.icon,
-        color: quickPlaceForm.color,
-        active: quickPlaceForm.active,
-        featured: quickPlaceForm.featured,
-        locationVerified: quickPlaceForm.locationVerified,
-        sortOrder: Number(quickPlaceForm.sortOrder),
-      });
-      await backend.refresh();
-      setQuickPlaceForm({
-        ...emptyQuickPlaceForm,
-        sortOrder: String((backend.quickPlaces.length + 2) * 10),
-      });
-      setNotice(
-        quickPlaceForm.id
-          ? "Ponto da cidade atualizado com coordenadas confirmadas."
-          : "Ponto da cidade cadastrado com coordenadas confirmadas.",
-      );
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível salvar o ponto rápido.",
-      );
-    } finally {
-      setBusyId("");
-    }
-  }
-  async function deleteQuickPlace(place: QuickPlace) {
-    if (
-      !window.confirm(
-        `Excluir “${place.name}”? Essa ação não poderá ser desfeita.`,
-      )
-    )
-      return;
-    setBusyId(`quick-delete-${place.id}`);
-    setNotice("");
-    try {
-      await backend.deleteQuickPlace(place.id);
-      await backend.refresh();
-      if (quickPlaceForm.id === place.id)
-        setQuickPlaceForm(emptyQuickPlaceForm);
-      setNotice("Ponto rápido excluído.");
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível excluir o ponto rápido.",
-      );
-    } finally {
-      setBusyId("");
-    }
-  }
-  async function dropQuickPlace(targetId: string) {
-    if (!draggedPlaceId || draggedPlaceId === targetId) return;
-    const next = [...orderedQuickPlaces];
-    const from = next.findIndex((place) => place.id === draggedPlaceId);
-    const to = next.findIndex((place) => place.id === targetId);
-    if (from < 0 || to < 0) return;
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
-    setQuickPlaceOrder(next.map((place) => place.id));
-    setDraggedPlaceId("");
-    setBusyId("quick-order");
-    try {
-      await backend.reorderQuickPlaces(next.map((place) => place.id));
-      await backend.refresh();
-      setQuickPlaceOrder(null);
-      setNotice("Ordem dos pontos rápidos atualizada.");
-    } catch (error) {
-      setQuickPlaceOrder(null);
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível atualizar a ordem.",
-      );
-    } finally {
-      setBusyId("");
-    }
-  }
-  const approvalLabel = (status: string) =>
-    status === "approved"
-      ? "Aprovado"
-      : status === "rejected"
-        ? "Recusado"
-        : status === "suspended"
-          ? "Bloqueado"
-          : "Pendente";
-  return (
-    <div className="admin-shell">
-      <aside className="admin-nav">
-        <Brand compact />
-        <nav aria-label="Menu administrativo">
-          <button className="active" onClick={() => document.getElementById("admin-overview")?.scrollIntoView({ behavior: "smooth" })}>
-            <Gauge /> Visão geral
-          </button>
-          <button onClick={() => document.getElementById("admin-rides")?.scrollIntoView({ behavior: "smooth" })}>
-            <Route /> Corridas
-          </button>
-          <button onClick={() => document.getElementById("admin-drivers")?.scrollIntoView({ behavior: "smooth" })}>
-            <Bike /> Motoristas
-          </button>
-          <button onClick={() => document.getElementById("admin-dispatch")?.scrollIntoView({ behavior: "smooth" })}>
-            <Route /> Distribuição
-          </button>
-          <button onClick={() => document.getElementById("admin-fares")?.scrollIntoView({ behavior: "smooth" })}>
-            <CircleDollarSign /> Tarifas
-          </button>
-          <button disabled title="Ainda não disponível">
-            <Users /> Passageiros
-          </button>
-          <button onClick={() => document.getElementById("admin-finance")?.scrollIntoView({ behavior: "smooth" })}>
-            <Wallet /> Financeiro
-          </button>
-          <button
-            onClick={() =>
-              document
-                .getElementById("quick-places-admin")
-                ?.scrollIntoView({ behavior: "smooth" })
-            }
-          >
-            <MapPin /> Pontos da cidade
-          </button>
-          <button disabled title="Ainda não disponível">
-            <Headphones /> Suporte
-          </button>
-        </nav>
-        <div className="admin-user">
-          <span>MV</span>
-          <div>
-            <b>{backend.profile?.full_name || "Central MotoPombal"}</b>
-            <small>Administrador</small>
-          </div>
-        </div>
-      </aside>
-      <main className="admin-main">
-        <header className="admin-header">
-          <div>
-            <span>
-              {new Intl.DateTimeFormat("pt-BR", { dateStyle: "full" })
-                .format(new Date())
-                .toUpperCase()}
-            </span>
-            <h1>Operação em tempo real</h1>
-          </div>
-          <div className="operation-live">
-            <i /> Supabase conectado
-          </div>
-        </header>
-        <section className="kpi-grid" id="admin-overview">
-          <article>
-            <span className="kpi-icon blue">
-              <Activity />
-            </span>
-            <div>
-              <small>Corridas hoje</small>
-              <strong>{stats?.ridesToday || 0}</strong>
-              <em>Dados reais</em>
-            </div>
-          </article>
-          <article>
-            <span className="kpi-icon green">
-              <Bike />
-            </span>
-            <div>
-              <small>Motoristas online</small>
-              <strong>{stats?.driversOnline || 0}</strong>
-              <em>{stats?.driversAvailable || 0} disponíveis</em>
-            </div>
-          </article>
-          <article>
-            <span className="kpi-icon red">
-              <Clock3 />
-            </span>
-            <div>
-              <small>Espera média</small>
-              <strong>
-                {stats?.averageWaitMinutes.toFixed(1) || "0,0"} min
-              </strong>
-              <em>Hoje</em>
-            </div>
-          </article>
-          <article>
-            <span className="kpi-icon amber">
-              <CircleDollarSign />
-            </span>
-            <div>
-              <small>Faturamento</small>
-              <strong>{money(stats?.revenueCents)}</strong>
-              <em>Corridas finalizadas</em>
-            </div>
-          </article>
-        </section>
-        <section className="admin-dispatch-card" id="admin-dispatch" aria-labelledby="admin-dispatch-title">
-          <div className="card-title">
-            <div><span>DISTRIBUIÇÃO DE CORRIDAS</span><h2 id="admin-dispatch-title">Modo escolhido pelo ADM</h2></div>
-            <em className={`approval-status ${backend.dispatchMode === "round_robin" ? "approved" : ""}`}>
-              {!backend.dispatchReady ? "Banco aguardando atualização" : backend.dispatchMode === "round_robin" ? "Fila ativa" : backend.dispatchMode === "broadcast" ? "Oferta simultânea" : "Carregando"}
-            </em>
-          </div>
-          <p>Esta escolha vale para novas ofertas. Todos os motoristas online, disponíveis, aprovados e em turno são considerados, independentemente da distância.</p>
-          {!backend.dispatchReady && <p className="admin-dispatch-pending">Para liberar esta escolha, aplique a atualização do banco de dados do modo de distribuição.</p>}
-          <div className="admin-dispatch-options" role="radiogroup" aria-label="Modo de distribuição">
-            <label className={selectedDispatchMode === "round_robin" ? "selected" : ""}>
-              <input type="radio" name="dispatch-mode" value="round_robin" checked={selectedDispatchMode === "round_robin"} onChange={() => setDispatchModeChoice("round_robin")} />
-              <span><strong>Fila / rodízio</strong><small>Uma oferta por vez, na ordem da fila. O motorista vê sua posição no mapa.</small></span>
-            </label>
-            <label className={selectedDispatchMode === "broadcast" ? "selected" : ""}>
-              <input type="radio" name="dispatch-mode" value="broadcast" checked={selectedDispatchMode === "broadcast"} onChange={() => setDispatchModeChoice("broadcast")} />
-              <span><strong>Oferta simultânea</strong><small>A corrida aparece para todos os motoristas elegíveis; o primeiro a aceitar assume.</small></span>
-            </label>
-          </div>
-          <Button type="button" disabled={busyId === "dispatch" || !backend.dispatchReady || !backend.dispatchMode || selectedDispatchMode === backend.dispatchMode} onClick={() => void saveDispatchMode()}>
-            {busyId === "dispatch" ? "SALVANDO…" : "APLICAR MODO"}
-          </Button>
-        </section>
-        <section className="admin-grid">
-          <article className="live-map-card">
-            <div className="card-title">
-              <div>
-                <span>MAPA OPERACIONAL</span>
-                <h2>Ribeira do Pombal agora</h2>
-              </div>
-            </div>
-            <MapCanvas admin nearbyDrivers={backend.adminMapDrivers} />
-          </article>
-          <article className="demand-card">
-            <div className="card-title">
-              <div>
-                <span>DEMANDA</span>
-                <h2>Dados operacionais</h2>
-              </div>
-            </div>
-            <div className="demand-now">
-              <Activity />
-              <div>
-                <b>Monitoramento real ativo</b>
-                <small>
-                  O histórico será formado conforme as corridas forem
-                  concluídas.
-                </small>
-              </div>
-            </div>
-          </article>
-        </section>
-        <section className="quick-places-admin-card" id="quick-places-admin">
-          <div className="card-title">
-            <div>
-              <span>DESTINOS</span>
-              <h2>Pontos da cidade</h2>
-            </div>
-            <em className="approval-status approved">
-              {backend.quickPlaces.filter((place) => place.active).length}{" "}
-              ativos
-            </em>
-          </div>
-          <p>
-            Cadastre locais da cidade, escolha os destaques da Home e arraste os
-            itens para mudar a ordem.
-          </p>
-          {backend.quickPlacesError && (
-            <div className="auth-message">{backend.quickPlacesError}</div>
-          )}
-          <div className="quick-places-admin-grid">
-            <form
-              id="quick-place-editor"
-              className="quick-place-form"
-              onSubmit={saveQuickPlace}
-            >
-              <div className="quick-place-form-title">
-                <div>
-                  <b>
-                    {quickPlaceForm.id ? "Editar ponto" : "Novo ponto rápido"}
-                  </b>
-                  <small>
-                    Os campos com coordenadas são usados diretamente na rota.
-                  </small>
-                </div>
-                {quickPlaceForm.id && (
-                  <button
-                    type="button"
-                    onClick={() => setQuickPlaceForm(emptyQuickPlaceForm)}
-                  >
-                    Cancelar edição
-                  </button>
-                )}
-              </div>
-              <div className="quick-place-fields">
-                <label>
-                  <span>Nome do local</span>
-                  <input
-                    required
-                    maxLength={100}
-                    value={quickPlaceForm.name}
-                    onChange={(event) =>
-                      setQuickPlaceForm((current) => ({
-                        ...current,
-                        name: event.target.value,
-                      }))
-                    }
-                    placeholder="Hospital Municipal"
-                  />
-                </label>
-                <label className="wide">
-                  <span>Endereço completo</span>
-                  <input
-                    required
-                    maxLength={240}
-                    value={quickPlaceForm.address}
-                    onChange={(event) =>
-                      setQuickPlaceForm((current) => ({
-                        ...current,
-                        address: event.target.value,
-                      }))
-                    }
-                    placeholder="Rua, número, bairro, Ribeira do Pombal - BA"
-                  />
-                </label>
-                <label>
-                  <span>Latitude</span>
-                  <input
-                    required
-                    type="number"
-                    step="any"
-                    min="-90"
-                    max="90"
-                    value={quickPlaceForm.latitude}
-                    onChange={(event) =>
-                      setQuickPlaceForm((current) => ({
-                        ...current,
-                        latitude: event.target.value,
-                        locationVerified: false,
-                      }))
-                    }
-                  />
-                </label>
-                <label>
-                  <span>Longitude</span>
-                  <input
-                    required
-                    type="number"
-                    step="any"
-                    min="-180"
-                    max="180"
-                    value={quickPlaceForm.longitude}
-                    onChange={(event) =>
-                      setQuickPlaceForm((current) => ({
-                        ...current,
-                        longitude: event.target.value,
-                        locationVerified: false,
-                      }))
-                    }
-                  />
-                </label>
-                <div className="quick-place-map-control wide">
-                  <button type="button" onClick={openQuickPlaceMap}>
-                    <MapPin /> DEFINIR LOCALIZAÇÃO NO MAPA
-                  </button>
-                  <span className={quickPlaceForm.locationVerified ? "verified" : "pending"} role="status">
-                    <MapPin />
-                    {quickPlaceForm.locationVerified
-                      ? "Localização definida"
-                      : "Localização ainda não confirmada no mapa"}
-                  </span>
-                </div>
-                <label>
-                  <span>Categoria</span>
-                  <select
-                    value={quickPlaceForm.category}
-                    onChange={(event) =>
-                      setQuickPlaceForm((current) => ({
-                        ...current,
-                        category: event.target.value as QuickPlace["category"],
-                      }))
-                    }
-                  >
-                    {QUICK_PLACE_CATEGORIES.filter(
-                      (item) => item.value !== "all",
-                    ).map((item) => (
-                      <option value={item.value} key={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>Ordem</span>
-                  <input
-                    required
-                    type="number"
-                    min="0"
-                    max="100000"
-                    value={quickPlaceForm.sortOrder}
-                    onChange={(event) =>
-                      setQuickPlaceForm((current) => ({
-                        ...current,
-                        sortOrder: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <label className="color-field">
-                  <span>Cor do ícone</span>
-                  <div>
-                    <input
-                      type="color"
-                      value={quickPlaceForm.color}
-                      onChange={(event) =>
-                        setQuickPlaceForm((current) => ({
-                          ...current,
-                          color: event.target.value,
-                        }))
-                      }
-                    />
-                    <input
-                      required
-                      pattern="^#[0-9A-Fa-f]{6}$"
-                      value={quickPlaceForm.color}
-                      onChange={(event) =>
-                        setQuickPlaceForm((current) => ({
-                          ...current,
-                          color: event.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                </label>
-              </div>
-              <fieldset className="icon-library">
-                <legend>Biblioteca de ícones</legend>
-                {QUICK_PLACE_ICONS.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      type="button"
-                      key={item.value}
-                      className={
-                        quickPlaceForm.icon === item.value ? "active" : ""
-                      }
-                      onClick={() =>
-                        setQuickPlaceForm((current) => ({
-                          ...current,
-                          icon: item.value,
-                        }))
-                      }
-                      title={item.label}
-                    >
-                      <Icon />
-                      <span>{item.label}</span>
-                    </button>
-                  );
-                })}
-              </fieldset>
-              <div className="quick-place-options">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={quickPlaceForm.active}
-                    onChange={(event) =>
-                      setQuickPlaceForm((current) => ({
-                        ...current,
-                        active: event.target.checked,
-                      }))
-                    }
-                  />{" "}
-                  Ativo
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={quickPlaceForm.featured}
-                    onChange={(event) =>
-                      setQuickPlaceForm((current) => ({
-                        ...current,
-                        featured: event.target.checked,
-                      }))
-                    }
-                  />{" "}
-                  ⭐ Exibir na tela inicial
-                </label>
-              </div>
-              <Button disabled={busyId === "quick-place-save" || !quickPlaceForm.locationVerified}>
-                {busyId === "quick-place-save"
-                  ? "SALVANDO…"
-                  : quickPlaceForm.id
-                    ? "SALVAR ALTERAÇÕES"
-                    : "CADASTRAR PONTO"}
-              </Button>
-            </form>
-            <div className="quick-place-admin-list">
-              <div className="quick-place-list-title">
-                <div>
-                  <b>Pontos cadastrados</b>
-                  <small>Arraste pelo ícone para reordenar</small>
-                </div>
-                {busyId === "quick-order" && <span>Salvando ordem…</span>}
-              </div>
-              {backend.quickPlacesLoading ? (
-                <div className="quick-place-state">Carregando…</div>
-              ) : orderedQuickPlaces.length ? (
-                orderedQuickPlaces.map((place) => (
-                  <article
-                    key={place.id}
-                    draggable
-                    onDragStart={() => setDraggedPlaceId(place.id)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={() => void dropQuickPlace(place.id)}
-                    className={draggedPlaceId === place.id ? "dragging" : ""}
-                  >
-                    <GripVertical className="drag-handle" />
-                    <span
-                      className="admin-place-icon"
-                      style={{ backgroundColor: `${place.color}18` }}
-                    >
-                      <QuickPlaceIcon name={place.icon} color={place.color} />
-                    </span>
-                    <div>
-                      <b>
-                        {place.featured ? "⭐ " : ""}
-                        {place.name}
-                      </b>
-                      <small>{place.address}</small>
-                      <em>
-                        {QUICK_PLACE_CATEGORIES.find(
-                          (item) => item.value === place.category,
-                        )?.label || place.category}{" "}
-                        · 📍 Coordenadas salvas
-                        · {place.active ? "Ativo" : "Inativo"}
-                      </em>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => editQuickPlace(place)}
-                      aria-label={`Editar ${place.name}`}
-                    >
-                      <Pencil />
-                    </button>
-                    <button
-                      type="button"
-                      className="delete"
-                      disabled={busyId === `quick-delete-${place.id}`}
-                      onClick={() => void deleteQuickPlace(place)}
-                      aria-label={`Excluir ${place.name}`}
-                    >
-                      <Trash2 />
-                    </button>
-                  </article>
-                ))
-              ) : (
-                <div className="quick-place-state">
-                  Nenhum ponto rápido cadastrado.
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
-        <section className="region-fares-card" id="admin-fares">
-          <div className="card-title">
-            <div>
-              <span>FINANCEIRO</span>
-              <h2>Tarifas por Região</h2>
-            </div>
-            <em className="approval-status approved">Preço por bairro ativo</em>
-          </div>
-          <p>
-            O destino define o preço. Sem uma tarifa especial correspondente, o
-            sistema usa a tarifa padrão da cidade.
-          </p>
-          <div className="region-fare-table">
-            <div className="region-fare-head">
-              <span>Nome da região/bairro</span>
-              <span>Valor da corrida</span>
-              <span>Status</span>
-              <span>Ação</span>
-            </div>
-            {backend.fareRegions.map((region) => (
-              <form
-                key={region.id}
-                className="region-fare-row"
-                onSubmit={(event) => saveRegion(event, region)}
-              >
-                <input
-                  required
-                  name="name"
-                  maxLength={80}
-                  defaultValue={region.name}
-                  aria-label={`Nome da região ${region.name}`}
-                />
-                <label className="money-input">
-                  <span>R$</span>
-                  <input
-                    required
-                    name="amount"
-                    min="0.01"
-                    step="0.01"
-                    inputMode="decimal"
-                    defaultValue={(region.amount_cents / 100).toFixed(2)}
-                    aria-label={`Valor de ${region.name}`}
-                  />
-                </label>
-                <label className="region-active">
-                  <input
-                    type="checkbox"
-                    name="active"
-                    defaultChecked={region.active}
-                    disabled={region.is_default}
-                  />
-                  <span>{region.is_default ? "Padrão ativa" : "Ativa"}</span>
-                </label>
-                <Button disabled={busyId === `region-${region.id}`}>
-                  {busyId === `region-${region.id}` ? "SALVANDO…" : "SALVAR"}
-                </Button>
-              </form>
-            ))}
-            <form
-              className="region-fare-row region-fare-new"
-              onSubmit={(event) => saveRegion(event)}
-            >
-              <input
-                required
-                name="name"
-                maxLength={80}
-                placeholder="Novo bairro ou região"
-                aria-label="Nome da nova região"
-              />
-              <label className="money-input">
-                <span>R$</span>
-                <input
-                  required
-                  name="amount"
-                  min="0.01"
-                  step="0.01"
-                  inputMode="decimal"
-                  placeholder="0,00"
-                  aria-label="Valor da nova região"
-                />
-              </label>
-              <label className="region-active">
-                <input type="checkbox" name="active" defaultChecked />
-                <span>Ativa</span>
-              </label>
-              <Button disabled={busyId === "region-new"}>
-                {busyId === "region-new" ? "ADICIONANDO…" : "ADICIONAR"}
-              </Button>
-            </form>
-          </div>
-        </section>
-        <section className="fare-settings-card">
-          <div className="card-title">
-            <div>
-              <span>ESTRUTURA FUTURA</span>
-              <h2>Tarifa por distância e tempo</h2>
-            </div>
-            <em className="approval-status">Não usada na cobrança atual</em>
-          </div>
-          <p>
-            Estrutura preservada para regras futuras. O valor por minuto inicial
-            permanece em R$ 0,00.
-          </p>
-          <form onSubmit={saveFare}>
-            {(
-              [
-                ["base", "Tarifa base"],
-                ["perKm", "Valor por km"],
-                ["perMinute", "Valor por minuto"],
-                ["minimum", "Tarifa mínima"],
-              ] as const
-            ).map(([key, label]) => (
-              <label key={key}>
-                <small>{label}</small>
-                <span>R$</span>
-                <input
-                  required
-                  min="0"
-                  step="0.01"
-                  inputMode="decimal"
-                  value={fareForm[key]}
-                  onChange={(event) =>
-                    setFareForm((current) => ({
-                      ...current,
-                      [key]: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            ))}
-            <Button disabled={busyId === "fare"}>
-              {busyId === "fare" ? "SALVANDO…" : "SALVAR PARA O FUTURO"}
-            </Button>
-          </form>
-        </section>
-        {finance && (
-          <section className="finance-card" id="admin-finance">
-            <div className="card-title">
-              <div>
-                <span>FINANCEIRO</span>
-                <h2>Resumo dos últimos 30 dias</h2>
-              </div>
-              <em className="approval-status">Comissão não configurada</em>
-            </div>
-            <div className="finance-summary">
-              <div>
-                <small>Corridas finalizadas</small>
-                <b>{finance.summary.completedRides}</b>
-              </div>
-              <div>
-                <small>Faturamento bruto</small>
-                <b>{money(finance.summary.grossCents)}</b>
-              </div>
-              <div>
-                <small>Pix confirmado</small>
-                <b>{money(finance.summary.pixPaidCents)}</b>
-              </div>
-              <div>
-                <small>Dinheiro confirmado</small>
-                <b>{money(finance.summary.cashPaidCents)}</b>
-              </div>
-              <div>
-                <small>Total recebido</small>
-                <b>{money(finance.summary.receivedCents)}</b>
-              </div>
-              <div>
-                <small>Pagamentos pendentes</small>
-                <b>{money(finance.summary.pendingCents)}</b>
-              </div>
-              <div>
-                <small>Cancelamentos</small>
-                <b>{finance.summary.cancellations}</b>
-              </div>
-            </div>
-            <div className="finance-drivers">
-              {finance.byDriver.length ? (
-                finance.byDriver.map((item) => (
-                  <div key={item.driverId}>
-                    <span>
-                      <b>{item.driverName}</b>
-                      <small>{item.rides} corrida(s)</small>
-                    </span>
-                    <span>
-                      Bruto <b>{money(item.grossCents)}</b>
-                    </span>
-                    <span>
-                      Confirmado <b>{money(item.paidCents)}</b>
-                    </span>
-                    <span>
-                      Pendente <b>{money(item.pendingCents)}</b>
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <p>Nenhuma corrida finalizada no período.</p>
-              )}
-            </div>
-          </section>
-        )}
-        <section className="driver-approval-card" id="admin-drivers">
-          <div className="card-title">
-            <div>
-              <span>CADASTROS</span>
-              <h2>Aprovação de motoristas</h2>
-            </div>
-          </div>
-          {notice && <div className="auth-message">{notice}</div>}
-          <div className="driver-directory">
-            {drivers.length ? (
-              drivers.map((driver) => {
-                const vehicle = driver.vehicles?.find(
-                  (item) => item.active !== false,
-                );
-                return (
-                  <article key={driver.profile_id}>
-                    <div className="driver-avatar small">
-                      {driver.profiles?.avatarUrl ? (
-                        <AvatarPhoto
-                          src={driver.profiles.avatarUrl}
-                          alt="Foto do motorista"
-                        />
-                      ) : (
-                        initials(driver.profiles?.full_name)
-                      )}
-                    </div>
-                    <div className="directory-copy">
-                      <b>
-                        {driver.profiles?.full_name || "Nome não informado"}
-                      </b>
-                      <small>
-                        {driver.profiles?.phone || "Telefone não informado"}
-                      </small>
-                      <span>
-                        {vehicle
-                          ? `${vehicle.brand} ${vehicle.model} · ${vehicle.color} · ${vehicle.plate}`
-                          : "Moto ainda não cadastrada"}
-                      </span>
-                    </div>
-                    <em className={`approval-status ${driver.approval_status}`}>
-                      {approvalLabel(driver.approval_status)}
-                    </em>
-                    {driver.approval_status === "pending" && (
-                      <div className="approval-actions">
-                        <Button
-                          disabled={busyId === driver.profile_id || !vehicle}
-                          variant="outline"
-                          onClick={() => decide(driver.profile_id, "rejected")}
-                        >
-                          Recusar
-                        </Button>
-                        <Button
-                          disabled={busyId === driver.profile_id || !vehicle}
-                          onClick={() => decide(driver.profile_id, "approved")}
-                        >
-                          Aprovar
-                        </Button>
-                      </div>
-                    )}
-                    {driver.approval_status === "approved" && !driver.profiles?.blocked && (
-                      <div className="approval-actions">
-                        <Button disabled={busyId === driver.profile_id} variant="outline" onClick={() => decide(driver.profile_id, "blocked")}>Bloquear</Button>
-                      </div>
-                    )}
-                    {driver.profiles?.blocked && (
-                      <div className="approval-actions">
-                        <Button disabled={busyId === driver.profile_id} variant="outline" onClick={() => decide(driver.profile_id, "pending")}>Desbloquear para revisão</Button>
-                      </div>
-                    )}
-                    {driver.approval_status === "rejected" && !driver.profiles?.blocked && (
-                      <div className="approval-actions">
-                        <Button disabled={busyId === driver.profile_id || !vehicle} onClick={() => decide(driver.profile_id, "approved")}>Aprovar</Button>
-                      </div>
-                    )}
-                    {!driver.profiles?.blocked && driver.approval_status !== "approved" && (
-                      <div className="approval-actions">
-                        <Button disabled={busyId === driver.profile_id} variant="outline" onClick={() => decide(driver.profile_id, "blocked")}>Bloquear</Button>
-                      </div>
-                    )}
-                  </article>
-                );
-              })
-            ) : (
-              <div className="empty-table">Nenhum motorista cadastrado.</div>
-            )}
-          </div>
-        </section>
-        <section className="trips-card" id="admin-rides">
-          <div className="card-title">
-            <div>
-              <span>ACOMPANHAMENTO</span>
-              <h2>Corridas recentes</h2>
-            </div>
-          </div>
-          <div className="trips-table">
-            <div className="trip-row trip-head">
-              <span>Corrida</span>
-              <span>Passageiro</span>
-              <span>Trajeto</span>
-              <span>Status</span>
-              <span>Valor</span>
-            </div>
-            {trips.length ? (
-              trips.map((trip) => (
-                <div className="trip-row" key={trip.id}>
-                  <b>#{trip.id.slice(0, 8)}</b>
-                  <span>
-                    <b>{trip.passenger_id.slice(0, 8)}</b>
-                  </span>
-                  <span>
-                    {trip.origin_address} → {trip.destination_address}
-                  </span>
-                  <em
-                    className={`trip-status ${trip.status === "finalizada" ? "finished" : ""}`}
-                  >
-                    {trip.status.replaceAll("_", " ")}
-                  </em>
-                  <span>
-                    <b>{money(trip.final_fare_cents ?? trip.fare_cents)}</b>
-                    {trip.status === "finalizada" && trip.payment_method === "cash" &&
-                      trip.payment_status === "aguardando_pagamento" && (
-                        <button type="button" disabled={busyId === trip.id}
-                          onClick={() => void confirmAdminCash(trip.id)}>
-                          {busyId === trip.id ? "Confirmando…" : "Confirmar dinheiro"}
-                        </button>
-                      )}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <div className="empty-table">
-                Nenhuma corrida registrada ainda.
-              </div>
-            )}
-          </div>
-        </section>
-      </main>
-      {quickPlaceMapOpen && (
-        <div className="map-picker-overlay" role="dialog" aria-modal="true" aria-labelledby="quick-place-map-title">
-          <div className="map-picker-sheet quick-place-map-picker">
-            <header>
-              <div>
-                <small>COORDENADA OFICIAL DO PONTO</small>
-                <h2 id="quick-place-map-title">Definir localização no mapa</h2>
-              </div>
-              <button type="button" onClick={() => setQuickPlaceMapOpen(false)} aria-label="Fechar mapa">
-                <X />
-              </button>
-            </header>
-            <p>Toque no prédio ou na entrada correta. Arraste o PIN para fazer o ajuste fino antes de confirmar.</p>
-            <div className="map-picker-canvas">
-              <RealMap pickPoint={quickPlaceMapPoint} onPick={setQuickPlaceMapPoint} />
-            </div>
-            <div className="map-picker-coordinates">
-              <MapPin /> {quickPlaceMapPoint.lat.toFixed(7)}, {quickPlaceMapPoint.lng.toFixed(7)}
-            </div>
-            <div className="map-picker-actions">
-              <button type="button" onClick={() => setQuickPlaceMapOpen(false)}>Cancelar</button>
-              <button type="button" onClick={confirmQuickPlaceMap}>Usar esta localização</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

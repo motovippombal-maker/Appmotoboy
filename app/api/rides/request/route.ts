@@ -1,5 +1,5 @@
-import { z } from "zod";
 import { ApiError, audit, consumeRateLimit, jsonError, requireUser } from "@/lib/backend/api";
+import { isRideServiceMigrationMissing, rideRequestSchema } from "@/lib/backend/ride-request";
 import { expireRideSearches } from "@/lib/backend/dispatch";
 import { calculateRoute } from "@/lib/backend/routing";
 import { requireConfiguredFare } from "@/lib/backend/fare";
@@ -17,19 +17,11 @@ import {
 import { assertPaymentMethodAvailable } from "@/lib/backend/payment";
 import { dispatchPushQueue } from "@/lib/backend/push";
 
-const schema = z.object({
-  origin: z.object({ address: z.string().min(3).max(200), lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }),
-  destination: z.object({ address: z.string().min(3).max(200), lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }),
-  paymentMethod: z.enum(["pix", "cash"]).default("cash"),
-  couponCode: z.string().trim().min(3).max(24).optional(),
-  quoteToken: z.string().min(40).max(5000),
-});
-
 export async function POST(request: Request) {
   try {
     const { supabase, user } = await requireUser(request, ["passenger"]);
     await consumeRateLimit(supabase, `ride-request:${user.id}`, 4, 60);
-    const input = schema.parse(await request.json());
+    const input = rideRequestSchema.parse(await request.json());
     assertPaymentMethodAvailable(input.paymentMethod);
     await expireRideSearches(supabase);
     const { data: existingRide } = await supabase.from("rides").select("id,status").eq("passenger_id", user.id).not("status", "in", "(finalizada,cancelada)").limit(1).maybeSingle();
@@ -101,6 +93,12 @@ export async function POST(request: Request) {
 
     const { coupon, resolvedFare, fareCents } = quoted;
     const ridePayload: Record<string, unknown> = { passenger_id: user.id, status: "procurando_motorista", origin_address: input.origin.address, origin_lat: input.origin.lat, origin_lng: input.origin.lng, destination_address: input.destination.address, destination_lat: input.destination.lat, destination_lng: input.destination.lng, distance_meters: route.distanceMeters, duration_seconds: route.durationSeconds, route_geometry: route.geometry, fare_cents: fareCents, estimated_distance_meters: route.distanceMeters, estimated_duration_seconds: route.durationSeconds, estimated_fare_cents: fareCents, fare_region_id: resolvedFare.fareRegion.id, fare_region_name: resolvedFare.fareRegion.name, fare_pricing_mode: "region", fare_rule_snapshot: resolvedFare.snapshot, service_area_id: resolvedFare.serviceArea.id, service_area_name: resolvedFare.serviceArea.name, fare_quote_fingerprint: quoted.claims.ruleFingerprint, payment_method: input.paymentMethod };
+    // Passageiros antigos continuam compatíveis durante a atualização do banco.
+    // Entregas exigem os campos novos; nunca fazemos fallback descartando detalhes.
+    if (input.serviceType !== "passenger") {
+      ridePayload.service_type = input.serviceType;
+      ridePayload.service_details = input.serviceDetails;
+    }
     if (coupon) {
       ridePayload.fare_rule_snapshot = { ...resolvedFare.snapshot, coupon: { code: coupon.code, discountCents: coupon.discountCents } };
       ridePayload.coupon_id = coupon.id;
@@ -109,6 +107,7 @@ export async function POST(request: Request) {
       ridePayload.original_fare_cents = coupon.originalFareCents;
     }
     const { data: ride, error } = await supabase.from("rides").insert(ridePayload).select().single();
+    if (isRideServiceMigrationMissing(error)) throw new ApiError(503, "As entregas ainda não estão disponíveis. Tente novamente mais tarde ou fale com a central.", "SERVICE_TYPES_NOT_CONFIGURED");
     if (error?.code === "23505") throw new ApiError(409, "A corrida já foi solicitada. Sincronize para acompanhar o estado atual.", "RIDE_REQUEST_ALREADY_EXISTS");
     if (error || !ride) throw error || new Error("Ride creation failed");
 
@@ -136,7 +135,7 @@ export async function POST(request: Request) {
       supabase.from("system_settings").select("value").eq("key", "dispatch").single(),
       supabase.from("ride_requests").select("id", { count: "exact", head: true }).eq("ride_id", ride.id),
     ]);
-    await audit(supabase, user.id, "ride.requested", "ride", ride.id, { offered_driver: offeredDriver, dispatch_mode: dispatchSetting?.value?.mode === "broadcast" ? "broadcast" : "round_robin", fare_region_id: resolvedFare.fareRegion.id, fare_region_name: resolvedFare.fareRegion.name, service_area_id: resolvedFare.serviceArea.id, fare_cents: fareCents, quote_fingerprint: quoted.claims.ruleFingerprint, coupon_code: coupon?.code ?? null, discount_cents: coupon?.discountCents ?? 0 });
+    await audit(supabase, user.id, "ride.requested", "ride", ride.id, { service_type: input.serviceType, offered_driver: offeredDriver, dispatch_mode: dispatchSetting?.value?.mode === "broadcast" ? "broadcast" : "round_robin", fare_region_id: resolvedFare.fareRegion.id, fare_region_name: resolvedFare.fareRegion.name, service_area_id: resolvedFare.serviceArea.id, fare_cents: fareCents, quote_fingerprint: quoted.claims.ruleFingerprint, coupon_code: coupon?.code ?? null, discount_cents: coupon?.discountCents ?? 0 });
     // O envio direto torna o alerta útil dentro da janela curta da oferta.
     // Falhas de Push nunca desfazem a corrida: Realtime e polling continuam ativos.
     try {
