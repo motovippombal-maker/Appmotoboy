@@ -1,9 +1,12 @@
 import { jsonError, requireUser } from "@/lib/backend/api";
+import { readWithPreMarketplaceFallback } from "@/lib/backend/marketplace-schema";
 
 export async function GET(request: Request) {
   try {
     const { supabase, user } = await requireUser(request, ["passenger"]);
-    const { data: rides, error } = await supabase.from("rides").select("*").eq("passenger_id", user.id).in("status", ["finalizada", "cancelada"]).order("created_at", { ascending: false }).limit(50);
+    const history = () => supabase.from("rides").select("*").eq("passenger_id", user.id).in("status", ["finalizada", "cancelada"]).order("created_at", { ascending: false }).limit(50);
+    const { data: rides, error } = await readWithPreMarketplaceFallback("market_order_id",
+      () => history().is("market_order_id", null), history);
     if (error) throw error;
     const driverIds = [...new Set((rides || []).map((ride) => ride.driver_id).filter(Boolean))];
     const rideIds = (rides || []).map((ride) => ride.id);

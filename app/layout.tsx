@@ -9,6 +9,7 @@ import "./driver-workspace.css";
 import "./passenger-center.css";
 import "./passenger-tracking.css";
 import "./ride-services.css";
+import "./marketplace.css";
 
 const publicSiteUrl = parsePublicSiteUrl(process.env.NEXT_PUBLIC_SITE_URL);
 
@@ -17,7 +18,7 @@ export const metadata: Metadata = {
   applicationName: "MotoPombal",
   title: "MotoPombal | Mobilidade em Ribeira do Pombal",
   description:
-    "Peça e acompanhe corridas de mototáxi e entregas de encomendas, comida e compras com a MotoPombal.",
+    "Peça mototáxi, envie encomendas e compre de lojas em Ribeira do Pombal com o MotoPombal.",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: "/icons/moto-pombal-192.png",

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ApiError, audit, consumeRateLimit, jsonError, requireUser } from "@/lib/backend/api";
 import { getPixProvider, publicPixStatus } from "@/lib/backend/payment";
 import { isInternalPhoneEmail } from "@/lib/auth/phone-identity";
+import { readWithPreMarketplaceFallback } from "@/lib/backend/marketplace-schema";
 
 const schema = z.object({ rideId: z.string().uuid() });
 
@@ -10,7 +11,11 @@ export async function POST(request: Request) {
     const { supabase, user } = await requireUser(request, ["passenger"]);
     await consumeRateLimit(supabase, `pix-charge:${user.id}`, 6, 60);
     const input = schema.parse(await request.json());
-    const { data: ride } = await supabase.from("rides").select("id, passenger_id, final_fare_cents, fare_cents, status, payment_method").eq("id", input.rideId).single();
+    const readRide = <Fields extends string>(fields: Fields) => supabase.from("rides").select(fields).eq("id", input.rideId).eq("passenger_id", user.id);
+    const { data: ride, error: rideError } = await readWithPreMarketplaceFallback("market_order_id",
+      () => readRide("id, passenger_id, final_fare_cents, fare_cents, status, payment_method").is("market_order_id", null).maybeSingle(),
+      () => readRide("*").maybeSingle());
+    if (rideError) throw rideError;
     if (!ride || ride.passenger_id !== user.id) throw new ApiError(404, "Corrida não encontrada.", "RIDE_NOT_FOUND");
     if (ride.status !== "finalizada") throw new ApiError(409, "A corrida precisa estar finalizada.", "RIDE_NOT_FINISHED");
     if (ride.payment_method !== "pix") throw new ApiError(409, "Esta corrida não foi configurada para pagamento Pix.", "PAYMENT_METHOD_MISMATCH");
@@ -43,7 +48,11 @@ export async function GET(request: Request) {
     const { supabase, user } = await requireUser(request, ["passenger"]);
     const rideId = new URL(request.url).searchParams.get("rideId");
     if (!rideId) return Response.json({ pix: publicPixStatus(), payment: null });
-    const { data: ride } = await supabase.from("rides").select("id,passenger_id").eq("id", rideId).maybeSingle();
+    const readRide = <Fields extends string>(fields: Fields) => supabase.from("rides").select(fields).eq("id", rideId).eq("passenger_id", user.id);
+    const { data: ride, error: rideError } = await readWithPreMarketplaceFallback("market_order_id",
+      () => readRide("id,passenger_id").is("market_order_id", null).maybeSingle(),
+      () => readRide("*").maybeSingle());
+    if (rideError) throw rideError;
     if (!ride || ride.passenger_id !== user.id) throw new ApiError(404, "Corrida não encontrada.", "RIDE_NOT_FOUND");
     const { data: payment } = await supabase.from("payments").select("id,method,status,amount_cents,paid_at,provider,pix_transactions(qr_code,qr_code_image_url,expires_at)").eq("ride_id", rideId).maybeSingle();
     return Response.json({ pix: publicPixStatus(), payment });

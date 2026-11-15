@@ -154,6 +154,10 @@ self.addEventListener("push", (event) => {
       payload.body = event.data.text() || payload.body;
     }
   }
+  if (payload.data?.type === "ride.offer" && typeof payload.data.expiresAt === "string") {
+    const expiresAt = Date.parse(payload.data.expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return;
+  }
   event.waitUntil(
     self.registration.showNotification(payload.title || "MotoPombal", {
       body: payload.body,
@@ -163,7 +167,9 @@ self.addEventListener("push", (event) => {
         ? `ride-offer:${payload.data.rideId}`
         : payload.data?.notificationId || undefined,
       renotify: payload.data?.type === "ride.offer",
-      requireInteraction: payload.data?.type === "ride.offer",
+      // Expiration on the server cannot dismiss a browser notification when
+      // the app is closed, so keep OS auto-dismiss enabled.
+      requireInteraction: false,
       vibrate: payload.data?.type === "ride.offer" ? [450, 160, 450, 160, 700] : [180],
       data: payload.data || {},
     }),
@@ -174,7 +180,15 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   // Nunca navega para uma URL arbitrária recebida no Push.
   const notificationData = event.notification.data || {};
-  const target = notificationData.type === "ride.offer" && notificationData.rideId
+  const marketOrderId = typeof notificationData.orderId === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(notificationData.orderId)
+    ? notificationData.orderId : null;
+  const marketNotice = notificationData.type === "market.order_update" || notificationData.type === "market.delivery_exception";
+  const target = marketNotice && marketOrderId && notificationData.audience === "customer"
+    ? `/compras/pedidos/${marketOrderId}`
+    : marketNotice && marketOrderId && notificationData.audience === "merchant" ? "/comerciante"
+    : marketNotice && marketOrderId && notificationData.audience === "admin" ? "/admin/marketplace"
+    : notificationData.type === "ride.offer" && notificationData.rideId
     ? `/?open=driver-offer&ride=${encodeURIComponent(String(notificationData.rideId))}`
     : typeof notificationData.type === "string" && notificationData.type.startsWith("queue.")
       ? "/?open=driver-queue"

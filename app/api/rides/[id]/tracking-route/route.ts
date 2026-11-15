@@ -7,6 +7,7 @@ import {
   requireUser,
 } from "@/lib/backend/api";
 import { getDispatchSettings } from "@/lib/backend/dispatch";
+import { readWithPreMarketplaceFallback } from "@/lib/backend/marketplace-schema";
 import { calculateRoute } from "@/lib/backend/routing";
 import { etaTarget } from "@/lib/tracking/realtime";
 
@@ -49,15 +50,18 @@ export async function GET(
     await consumeRateLimit(supabase, `tracking-route:${user.id}`, 12, 60);
     const ownerColumn =
       profile.role === "driver" ? "driver_id" : "passenger_id";
-    const { data: ride, error } = await supabase
+    const eligibleRides = <Fields extends string>(fields: Fields) => supabase
       .from("rides")
-      .select(
-        "id,status,driver_id,origin_lat,origin_lng,destination_lat,destination_lng",
-      )
+      .select(fields)
       .eq("id", id)
       .eq(ownerColumn, user.id)
-      .not("status", "in", "(finalizada,cancelada)")
-      .maybeSingle();
+      .not("status", "in", "(finalizada,cancelada)");
+    const { data: ride, error } = await readWithPreMarketplaceFallback("market_order_id",
+      () => {
+        const current = eligibleRides("id,status,driver_id,origin_lat,origin_lng,destination_lat,destination_lng");
+        return (profile.role === "passenger" ? current.is("market_order_id", null) : current).maybeSingle();
+      },
+      () => eligibleRides("*").maybeSingle());
     if (error) throw error;
     if (!ride || !ride.driver_id) {
       throw new ApiError(

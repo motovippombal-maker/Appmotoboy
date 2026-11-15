@@ -105,6 +105,7 @@ export function RealMap({
   const onNavigationInteractionRef = useRef(onNavigationInteraction);
   const refitRef = useRef<() => void>(() => undefined);
   const lastAutoFitKeyRef = useRef("");
+  const manualViewportRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
   const [tileUnavailable, setTileUnavailable] = useState(false);
   const offlineLayerRef = useRef<Layer | null>(null);
@@ -219,7 +220,10 @@ export function RealMap({
       L.control.zoom({ position: "bottomright" }).addTo(map);
       const updateZoomClass = () => elementRef.current?.classList.toggle("map-zoom-close", map.getZoom() >= 15);
       map.on("zoomend", updateZoomClass);
-      map.on("dragstart", () => onNavigationInteractionRef.current?.());
+      map.on("dragstart", () => {
+        manualViewportRef.current = true;
+        onNavigationInteractionRef.current?.();
+      });
       updateZoomClass();
       mapRef.current = map;
       setMapReady(true);
@@ -233,6 +237,7 @@ export function RealMap({
       driverMarkerModeRef.current = null;
       pickMarkerRef.current = null;
       refitRef.current = () => undefined;
+      manualViewportRef.current = false;
       mapRef.current?.remove();
       mapRef.current = null;
       offlineLayerRef.current = null;
@@ -296,7 +301,7 @@ export function RealMap({
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
         map.invalidateSize({ animate: false });
-        if (refit && !navigationMode) refitRef.current();
+        if (refit && !navigationMode && !manualViewportRef.current) refitRef.current();
       });
     };
     const refreshLayout = () => refresh(true);
@@ -320,6 +325,7 @@ export function RealMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || centerRequest <= 0) return;
+    manualViewportRef.current = false;
     const target = centerTargetRef.current;
     if (target) {
       map.flyTo(
@@ -381,6 +387,7 @@ export function RealMap({
     if (!map || !element || !mapReady) return;
     let cancelled = false;
     let updateChevrons: (() => void) | null = null;
+    let autoFitFrame = 0;
     void import("leaflet").then((module) => {
       if (cancelled) return;
       const L = module.default;
@@ -420,7 +427,7 @@ export function RealMap({
           layersRef.current.push(
             L.marker([currentLocation.lat, currentLocation.lng], { icon: markerIcon("current"), zIndexOffset: 900 })
               .addTo(map)
-              .bindTooltip(currentLocation.label || "Você está aqui", { direction: "top", offset: [0, -20] }),
+              .bindTooltip(safeMarkerLabel(currentLocation.label || "Você está aqui"), { direction: "top", offset: [0, -20] }),
           );
         }
         if (!route?.length) boundsPoints.push([currentLocation.lat, currentLocation.lng]);
@@ -429,7 +436,7 @@ export function RealMap({
         layersRef.current.push(
           L.marker([origin.lat, origin.lng], { icon: markerIcon("origin"), zIndexOffset: 700 })
             .addTo(map)
-            .bindTooltip(origin.label || "Origem", { direction: "top", offset: [0, -22] }),
+            .bindTooltip(safeMarkerLabel(origin.label || "Origem"), { direction: "top", offset: [0, -22] }),
         );
         boundsPoints.push([origin.lat, origin.lng]);
       }
@@ -437,7 +444,7 @@ export function RealMap({
         layersRef.current.push(
           L.marker([destination.lat, destination.lng], { icon: markerIcon("destination"), zIndexOffset: 750 })
             .addTo(map)
-            .bindTooltip(destination.label || "Destino", { direction: "top", offset: [0, -22] }),
+            .bindTooltip(safeMarkerLabel(destination.label || "Destino"), { direction: "top", offset: [0, -22] }),
         );
         boundsPoints.push([destination.lat, destination.lng]);
       }
@@ -457,7 +464,7 @@ export function RealMap({
         layersRef.current.push(
           L.marker([point.lat, point.lng], { icon: markerIcon("driver"), zIndexOffset: 500 })
             .addTo(map)
-            .bindTooltip(point.label || "Motorista disponível", { direction: "top", offset: [0, -22] }),
+            .bindTooltip(safeMarkerLabel(point.label || "Motorista disponível"), { direction: "top", offset: [0, -22] }),
         );
       });
       if (route?.length) {
@@ -516,12 +523,16 @@ export function RealMap({
       } else if (
         shouldAutoFitViewport(lastAutoFitKeyRef.current, nextAutoFitKey)
       ) {
-        lastAutoFitKeyRef.current = nextAutoFitKey;
-        window.requestAnimationFrame(refit);
+        manualViewportRef.current = false;
+        autoFitFrame = window.requestAnimationFrame(() => {
+          lastAutoFitKeyRef.current = nextAutoFitKey;
+          if (!manualViewportRef.current) refit();
+        });
       }
     });
     return () => {
       cancelled = true;
+      window.cancelAnimationFrame(autoFitFrame);
       if (updateChevrons) map.off("zoomend", updateChevrons);
     };
   }, [accuracyMeters, compactRoute, currentLocation, destination, landmarks, mapReady, nearbyDrivers, origin, route, navigationMode, trackingBadgeTitle]);
@@ -555,11 +566,11 @@ export function RealMap({
       }
       if (driverMarkerRef.current) {
         if (driverMarkerBadgeRef.current !== badgeKey) driverMarkerRef.current.setIcon(markerIcon());
-        driverMarkerRef.current.setLatLng([driver.lat, driver.lng]).setTooltipContent(driver.label || "MotoPombal");
+        driverMarkerRef.current.setLatLng([driver.lat, driver.lng]).setTooltipContent(safeMarkerLabel(driver.label || "MotoPombal"));
       } else {
         driverMarkerRef.current = L.marker([driver.lat, driver.lng], { icon: markerIcon(), zIndexOffset: 800 })
           .addTo(map)
-          .bindTooltip(driver.label || "MotoPombal", { direction: "top", offset: [0, -22] });
+          .bindTooltip(safeMarkerLabel(driver.label || "MotoPombal"), { direction: "top", offset: [0, -22] });
         driverMarkerModeRef.current = navigationMode;
         if (!origin && !destination) map.flyTo([driver.lat, driver.lng], 16, { duration: 0.55 });
       }

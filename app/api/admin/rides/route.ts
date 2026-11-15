@@ -1,11 +1,14 @@
 import { jsonError, requireAdmin } from "@/lib/backend/api";
+import { readWithPreMarketplaceFallback } from "@/lib/backend/marketplace-schema";
 
 export async function GET(request: Request) {
   try {
     const { supabase } = await requireAdmin(request);
-    const { data, error } = await supabase.from("rides")
+    const listRides = () => supabase.from("rides")
       .select("*")
       .order("created_at", { ascending: false }).limit(200);
+    const { data, error } = await readWithPreMarketplaceFallback("market_order_id",
+      () => listRides().is("market_order_id", null), listRides);
     if (error) throw error;
     const rides = data || [];
     const ids = [...new Set(rides.flatMap((ride) => [ride.passenger_id, ride.driver_id]).filter((id): id is string => Boolean(id)))];

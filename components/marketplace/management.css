@@ -1,0 +1,51 @@
+.marketplace-management {
+  min-height: 100dvh;
+  box-sizing: border-box;
+  padding: max(1rem, env(safe-area-inset-top)) 1rem max(2rem, env(safe-area-inset-bottom));
+  background: #eff4fa;
+  color: #102541;
+}
+.marketplace-management > * { width: min(100%, 68rem); margin-inline: auto; }
+.marketplace-management h1 { margin: .5rem 0; font-size: clamp(1.75rem, 5vw, 2.65rem); line-height: 1.2; font-weight: 800; }
+.marketplace-management h2 { margin: 0 0 .8rem; font-size: 1.15rem; font-weight: 750; }
+.marketplace-management h3 { margin: 0 0 .55rem; font-weight: 700; }
+.marketplace-management p { line-height: 1.5; }
+.marketplace-management a { color: #065cbf; text-decoration: underline; text-underline-offset: .15em; }
+.mp-manage-heading { margin-block-end: 1rem; }
+.mp-manage-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.mp-manage-heading p { margin: 0; color: #4a627d; }
+.mp-manage-card { padding: 1rem; margin-bottom: 1rem; border: 1px solid #d5e1ee; border-radius: .95rem; background: white; }
+.mp-manage-card + .mp-manage-card { margin-top: 1rem; }
+.mp-manage-card hr { margin: 1.1rem 0; border-color: #e2eaf4; }
+.mp-manage-form, .mp-manage-form fieldset { display: grid; gap: .7rem; min-width: 0; }
+.mp-manage-form fieldset:disabled { opacity: .7; }
+.mp-manage-form label { display: flex; flex-direction: column; gap: .3rem; min-width: 0; font-size: .9rem; font-weight: 650; }
+.mp-manage-form label:has(input[type="checkbox"]) { flex-direction: row; align-items: center; gap: .6rem; min-height: 2.4rem; }
+.mp-manage-form :is(input:not([type="checkbox"]),select,textarea), .mp-manage-select {
+  width: 100%; min-height: 2.75rem; box-sizing: border-box; padding: .5rem .65rem; border: 1px solid #aabcd2; border-radius: .55rem; background: #f9fbfe; color: #102541; font-size: 1rem;
+}
+.mp-manage-form textarea { resize: vertical; }
+.mp-manage-image-field { display: grid; align-content: start; gap: .5rem; }
+.mp-manage-image-field > p { margin: 0; }
+.mp-manage-button {
+  display: inline-flex; justify-content: center; align-items: center; width: fit-content; min-height: 2.75rem; padding: .5rem .8rem; border: 1px solid #095fc8; border-radius: .6rem; background: #0868d8; color: white; font-size: .9rem; font-weight: 700; text-align: center; cursor: pointer;
+}
+.mp-manage-button.secondary { background: #eef5ff; color: #084a9c; }
+.mp-manage-button.danger { border-color: #a12936; background: #fff2f3; color: #921d2d; }
+.mp-manage-button:disabled { opacity: .6; cursor: not-allowed; }
+.marketplace-management :is(button,input,select,textarea,summary,a):focus-visible { outline: 3px solid #0674e9; outline-offset: 2px; }
+.mp-manage-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: .7rem; }
+.mp-manage-row { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
+.mp-manage-tabs { display: flex; flex-wrap: wrap; gap: .45rem; margin-block: .9rem; }
+.mp-manage-tabs .mp-manage-button[aria-pressed="true"] { background: #0868d8; color: white; }
+.mp-manage-message { border: 1px solid #afc9e7; background: #e8f3ff; color: #173f6c; border-radius: .65rem; padding: .7rem .8rem; margin-block: .7rem; }
+.mp-manage-message.error { border-color: #dfb6b8; background: #fff1f2; color: #8b2430; }
+.mp-manage-list { display: grid; gap: .65rem; margin-block: .75rem; }
+.mp-manage-list > details, .mp-manage-list > article { min-width: 0; border: 1px solid #d3e1ef; border-radius: .7rem; padding: .75rem; overflow-wrap: anywhere; }
+.mp-manage-list > details > summary { cursor: pointer; font-weight: 700; line-height: 1.6; }
+.mp-manage-list > details[open] > summary { margin-block-end: .85rem; }
+.mp-manage-caption { color: #4a627d; font-size: .88rem; }
+.mp-manage-pill { display: inline-block; padding: .18rem .55rem; border-radius: 2rem; background: #e8f3ff; color: #084c9e; font-size: .82rem; font-weight: 700; }
+.mp-manage-order-values { display: flex; flex-wrap: wrap; gap: .7rem 1.35rem; margin-block: .7rem; }
+.mp-manage-order-values dt { color: #4a627d; font-size: .8rem; }
+.mp-manage-order-values dd { margin: .15rem 0 0; font-weight: 700; }

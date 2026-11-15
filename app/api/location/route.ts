@@ -2,6 +2,7 @@ import { ApiError, consumeRateLimit, jsonError, requireUser } from "@/lib/backen
 import { distanceKm } from "@/lib/backend/routing";
 import { driverLocationRpcArgs } from "@/lib/backend/driver-location-rpc";
 import { driverLocationInputSchema } from "@/lib/location/driver-location-input";
+import { readWithPreMarketplaceFallback } from "@/lib/backend/marketplace-schema";
 
 
 export async function POST(request: Request) {
@@ -21,7 +22,15 @@ export async function POST(request: Request) {
     let rideStatus: string | null = null;
     if (input.rideId) {
       const ownerColumn = profile.role === "driver" ? "driver_id" : "passenger_id";
-      const { data: ownedRide } = await supabase.from("rides").select("id,status").eq("id", input.rideId).eq(ownerColumn, user.id).not("status", "in", "(finalizada,cancelada)").maybeSingle();
+      const rideId = input.rideId;
+      const ownedRides = <Fields extends string>(fields: Fields) => supabase.from("rides").select(fields).eq("id", rideId).eq(ownerColumn, user.id).not("status", "in", "(finalizada,cancelada)");
+      const { data: ownedRide, error: lookupError } = await readWithPreMarketplaceFallback("market_order_id",
+        () => {
+          const current = ownedRides("id,status");
+          return (profile.role === "passenger" ? current.is("market_order_id", null) : current).maybeSingle();
+        },
+        () => ownedRides("*").maybeSingle());
+      if (lookupError) throw lookupError;
       if (!ownedRide) throw new ApiError(403, "Esta localização não pertence a uma corrida ativa sua.", "INVALID_RIDE_LOCATION");
       rideStatus = ownedRide.status;
     }

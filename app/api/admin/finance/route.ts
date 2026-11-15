@@ -1,4 +1,5 @@
 import { ApiError, jsonError, requireAdmin } from "@/lib/backend/api";
+import { readWithPreMarketplaceFallback } from "@/lib/backend/marketplace-schema";
 
 function chunks<T>(items: T[], size: number) {
   return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
@@ -15,7 +16,10 @@ export async function GET(request: Request) {
     const rides = [];
     const pageSize = 1000;
     for (let offset = 0; ; offset += pageSize) {
-      const { data, error } = await supabase.from("rides").select("id,driver_id,status,final_fare_cents,fare_cents,completed_at,created_at,payment_method,payment_status").gte("created_at", from.toISOString()).lte("created_at", to.toISOString()).in("status", ["finalizada", "cancelada"]).order("created_at", { ascending: false }).range(offset, offset + pageSize - 1);
+      const financeRides = <Fields extends string>(fields: Fields) => supabase.from("rides").select(fields).gte("created_at", from.toISOString()).lte("created_at", to.toISOString()).in("status", ["finalizada", "cancelada"]).order("created_at", { ascending: false }).range(offset, offset + pageSize - 1);
+      const { data, error } = await readWithPreMarketplaceFallback("market_order_id",
+        () => financeRides("id,driver_id,status,final_fare_cents,fare_cents,completed_at,created_at,payment_method,payment_status").is("market_order_id", null),
+        () => financeRides("*"));
       if (error) throw error;
       rides.push(...(data || []));
       if (!data || data.length < pageSize) break;

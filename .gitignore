@@ -45,6 +45,7 @@ next-env.d.ts
 /.npm-cache/
 /.agents/
 /.codex/
+/.codex-attachments/
 /.codex-verification/
 /supabase/.temp/
 /outputs/

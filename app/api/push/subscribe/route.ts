@@ -14,10 +14,12 @@ export async function POST(request: Request) {
     const config = pushConfiguration();
     if (!config.configured) throw new ApiError(503, `Push não configurado: ${config.missing.join(", ")}.`, "PUSH_NOT_CONFIGURED");
     const input = schema.parse(await request.json());
-    const { error: previousError } = await supabase.from("push_subscriptions")
-      .update({ active: false }).eq("endpoint", input.endpoint).neq("user_id", user.id);
-    if (previousError) throw previousError;
-    const { error } = await supabase.from("push_subscriptions").upsert({ user_id: user.id, endpoint: input.endpoint, p256dh: input.keys.p256dh, auth: input.keys.auth, user_agent: request.headers.get("user-agent"), active: true }, { onConflict: "user_id,endpoint" });
+    const { error } = await supabase.rpc("register_push_subscription", {
+      p_user_id: user.id, p_endpoint: input.endpoint, p_p256dh: input.keys.p256dh,
+      p_auth: input.keys.auth, p_user_agent: request.headers.get("user-agent"),
+    });
+    if (error?.code === "PGRST202" || error?.code === "42883")
+      throw new ApiError(503, "A inscrição de notificações precisa da atualização do banco.", "PUSH_REGISTRATION_NOT_READY");
     if (error) throw error;
     return Response.json({ subscribed: true });
   } catch (error) { return jsonError(error); }

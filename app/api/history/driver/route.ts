@@ -1,4 +1,5 @@
 import { jsonError, requireUser } from "@/lib/backend/api";
+import { readWithPreMarketplaceFallback } from "@/lib/backend/marketplace-schema";
 
 type CompletedRide = {
   id: string;
@@ -24,7 +25,9 @@ export async function GET(request: Request) {
     const allRides: CompletedRide[] = [];
     const pageSize = 1000;
     for (let from = 0; ; from += pageSize) {
-      const { data, error } = await supabase.from("rides").select("*").eq("driver_id", user.id).eq("status", "finalizada").order("completed_at", { ascending: false }).range(from, from + pageSize - 1);
+      const history = () => supabase.from("rides").select("*").eq("driver_id", user.id).eq("status", "finalizada").order("completed_at", { ascending: false }).range(from, from + pageSize - 1);
+      const { data, error } = await readWithPreMarketplaceFallback("market_order_id",
+        () => history().is("market_order_id", null), history);
       if (error) throw error;
       allRides.push(...((data || []) as CompletedRide[]));
       if (!data || data.length < pageSize) break;

@@ -81,6 +81,8 @@ export function makeOfflineRide(ride: Ride, driverId: string, pickup: SavedRoute
   const now = new Date().toISOString();
   const safeRide: Ride = {
     id: ride.id, passenger_id: ride.passenger_id, driver_id: driverId,
+    market_order_id: ride.market_order_id, market_dispatch_source: ride.market_dispatch_source,
+    market_delivery_exception_at: ride.market_delivery_exception_at,
     service_type: ride.service_type, service_details: ride.service_details ? { ...ride.service_details } : undefined,
     status: ride.status, origin_address: ride.origin_address, origin_lat: ride.origin_lat, origin_lng: ride.origin_lng,
     destination_address: ride.destination_address, destination_lat: ride.destination_lat, destination_lng: ride.destination_lng,

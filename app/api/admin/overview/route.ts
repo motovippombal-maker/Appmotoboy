@@ -1,4 +1,5 @@
 import { jsonError, requireAdmin } from "@/lib/backend/api";
+import { readWithPreMarketplaceFallback } from "@/lib/backend/marketplace-schema";
 
 export async function GET(request: Request) {
   try {
@@ -8,10 +9,15 @@ export async function GET(request: Request) {
     }).formatToParts(new Date());
     const part = (type: string) => dateParts.find((item) => item.type === type)!.value;
     const start = new Date(`${part("year")}-${part("month")}-${part("day")}T03:00:00.000Z`);
+    const recentRides = <Fields extends string>(fields: Fields) => supabase.from("rides").select(fields).order("created_at", { ascending: false }).limit(8);
     const [ridesTodayResult, driversResult, recentResult] = await Promise.all([
-      supabase.from("rides").select("id", { count: "exact", head: true }).gte("created_at", start.toISOString()),
+      readWithPreMarketplaceFallback("market_order_id",
+        () => supabase.from("rides").select("id", { count: "exact", head: true }).is("market_order_id", null).gte("created_at", start.toISOString()),
+        () => supabase.from("rides").select("*", { count: "exact" }).gte("created_at", start.toISOString()).limit(1)),
       supabase.from("drivers").select("online,available").eq("approval_status", "approved"),
-      supabase.from("rides").select("id,passenger_id,origin_address,destination_address,status,fare_cents,final_fare_cents,payment_method,payment_status").order("created_at", { ascending: false }).limit(8),
+      readWithPreMarketplaceFallback("market_order_id",
+        () => recentRides("id,passenger_id,origin_address,destination_address,status,fare_cents,final_fare_cents,payment_method,payment_status").is("market_order_id", null),
+        () => recentRides("*")),
     ]);
     for (const result of [ridesTodayResult, driversResult, recentResult]) {
       if (result.error) throw result.error;
@@ -19,10 +25,12 @@ export async function GET(request: Request) {
     const drivers = driversResult.data || [];
     const completed: Array<{ fare_cents: number; final_fare_cents: number | null; requested_at: string; accepted_at: string | null }> = [];
     for (let offset = 0; ; offset += 1000) {
-      const { data, error } = await supabase.from("rides")
-        .select("fare_cents,final_fare_cents,requested_at,accepted_at")
-        .eq("status", "finalizada").gte("finished_at", start.toISOString())
+      const completedRides = <Fields extends string>(fields: Fields) => supabase.from("rides")
+        .select(fields).eq("status", "finalizada").gte("finished_at", start.toISOString())
         .order("requested_at").range(offset, offset + 999);
+      const { data, error } = await readWithPreMarketplaceFallback("market_order_id",
+        () => completedRides("fare_cents,final_fare_cents,requested_at,accepted_at").is("market_order_id", null),
+        () => completedRides("*"));
       if (error) throw error;
       completed.push(...(data || []));
       if (!data || data.length < 1000) break;
@@ -36,7 +44,8 @@ export async function GET(request: Request) {
       driversAvailable: drivers.filter((driver) => driver.available).length,
       averageWaitMinutes: waits.length ? waits.reduce((sum, value) => sum + value, 0) / waits.length : 0,
       revenueCents: completed.reduce((sum, ride) => sum + (ride.final_fare_cents ?? ride.fare_cents), 0),
-      recentRides: recentResult.data || [],
+      recentRides: (recentResult.data || []).map(({ id, passenger_id, origin_address, destination_address, status, fare_cents, final_fare_cents, payment_method, payment_status }) =>
+        ({ id, passenger_id, origin_address, destination_address, status, fare_cents, final_fare_cents, payment_method, payment_status })),
     });
   } catch (error) {
     return jsonError(error);

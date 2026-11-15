@@ -64,6 +64,7 @@ import {
 } from "lucide-react";
 import { AuthPortal } from "@/components/auth/auth-portal";
 import { AdminOperationsPanel } from "@/components/admin/operations-panel";
+import { DriverMarketReceipt } from "@/components/marketplace/driver-receipt";
 import { RealMap, type LivePoint } from "@/components/map/real-map";
 import { connectivityManager, type ConnectivityState } from "@/lib/offline/connectivity";
 import { loadRegionPackage } from "@/lib/offline/region-package";
@@ -72,7 +73,7 @@ import { isInsideRegion, OFFLINE_REGION } from "@/lib/offline/region";
 import { clearOfflineRide, getOfflineRide, makeOfflineRide, queueOfflineTransition, savedRoute, saveOfflineRide, updateOfflineRide, type OfflineRidePackage, type OfflineEventType } from "@/lib/offline/ride-store";
 import { syncOfflineRide } from "@/lib/offline/ride-sync";
 import { selectDriverRide } from "@/lib/driver/ride-authority";
-import { shouldAcceptGpsFix } from "@/lib/tracking/driver-gps";
+import { driverGpsSampleIssue, shouldAcceptGpsFix } from "@/lib/tracking/driver-gps";
 import { PassengerCentral } from "@/components/passenger/passenger-central";
 import { DeliveryDetailsForm, RideServicePicker, RideServiceSummary } from "@/components/passenger/ride-service-booking";
 import { getRideService, rideServiceSchema, type RideServiceDetails, type RideServiceType } from "@/lib/ride-service";
@@ -588,6 +589,7 @@ function MapCanvas({
         trackingBadge={trackingBadge}
         landmarks={landmarks}
         followDriver={followDriver}
+        onNavigationInteraction={() => setFollowDriver(false)}
         centerTarget={
           (followDriver ? driver : undefined) ||
           currentLocation ||
@@ -2364,7 +2366,11 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             );
           }}
         />
-        {(stage === "draft" || stage === "quote") && <RideServicePicker value={serviceType} onChange={changeService} disabled={busy} />}
+        {(stage === "draft" || stage === "quote") && <><nav className="market-entry" aria-label="Serviços MotoPombal">
+          <button type="button" aria-pressed={serviceType === "passenger"} disabled={busy} onClick={() => changeService("passenger")}><Bike size={18} /> Transporte</button>
+          <button type="button" aria-pressed={serviceType !== "passenger"} disabled={busy} onClick={() => { if (serviceType === "passenger") changeService("delivery"); }}><Navigation size={18} /> Entrega</button>
+          <Link href="/compras"><ShoppingCart size={18} /> Compras</Link>
+        </nav>{serviceType !== "passenger" && <RideServicePicker value={serviceType} onChange={changeService} disabled={busy} deliveriesOnly />}</>}
         {stage === "draft" && <div className="passenger-home-sheet">
           <h1>{isDelivery ? "O que vamos entregar?" : "Para onde vamos?"}</h1>
           <button type="button" className="passenger-home-search" onClick={() => setDestinationSearchOpen(true)}><Search /><span>{isDelivery ? "Definir retirada e entrega" : "Digite seu destino"}</span><ChevronRight /></button>
@@ -3463,6 +3469,10 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const completedRide = ride ? null : backend.completedRide;
   const offer = backend.offers[0];
   const isDelivery = getRideService(ride?.service_type).id !== "passenger";
+  const isMarketDelivery = Boolean(ride?.market_order_id);
+  const marketOnHold = Boolean(ride?.market_delivery_exception_at);
+  const rideContactName = isMarketDelivery ? ride?.service_details?.recipientName : ride?.passenger?.full_name;
+  const rideContactPhone = isMarketDelivery ? ride?.service_details?.recipientPhone : ride?.passenger?.phone;
   const online = Boolean(state?.online);
   const hasActiveRide = Boolean(ride);
   const trackingGps = online || hasActiveRide;
@@ -3797,8 +3807,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
       if (lastSentRideId === currentRideId && !shouldSendLocationUpdate(lastSentSample, sample, Boolean(currentRideId))) return;
       sending = true;
       void updateLocation(position, currentRideId)
-        .then(() => { lastSentSample = sample; lastSentRideId = currentRideId; setLocationSyncError(""); })
-        .catch(() => { setLocationSyncError("Posição recebida no aparelho, mas ainda não enviada. Tentando novamente."); })
+        .then(() => { if (!disposed) { lastSentSample = sample; lastSentRideId = currentRideId; setLocationSyncError(""); } })
+        .catch(() => { if (!disposed) setLocationSyncError("Posição recebida no aparelho, mas ainda não enviada. Tentando novamente."); })
         .finally(() => {
           sending = false;
           const queued = queuedPosition;
@@ -3808,20 +3818,16 @@ function DriverPanel({ backend }: { backend: Backend }) {
     };
     const handlePosition = (position: GeolocationPosition) => {
         if (disposed) return;
-        if (
-          !isValidCoordinates({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-          })
-        ) {
-          setGpsStatus("O GPS retornou coordenadas inválidas.");
+        const issue = driverGpsSampleIssue(position);
+        if (issue) {
+          setGpsStatus(issue === "timestamp" ? "Posição antiga ou horário inválido. Aguardando dados atuais do GPS." : "O GPS retornou uma localização inválida.");
           return;
         }
         if (position.timestamp <= lastGpsTimestampRef.current) return;
-        lastGpsTimestampRef.current = position.timestamp;
-        lastFixAt = Date.now();
-        permissionDenied = false;
         if (!shouldAcceptGpsFix(currentGpsPositionRef.current, position)) return;
+        lastGpsTimestampRef.current = position.timestamp;
+        lastFixAt = Math.min(Date.now(), position.timestamp);
+        permissionDenied = false;
         currentGpsPositionRef.current = position;
         const nextPoint = {
           lat: position.coords.latitude,
@@ -3872,8 +3878,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
     startWatch();
     const recover = () => {
       if (fallbackPending && Date.now() - fallbackStartedAt > 25_000) fallbackPending = false;
-      if (document.hidden || permissionDenied || manualGpsRetryRef.current || fallbackPending || Date.now() - lastFixAt < 8_000) return;
-      if (Date.now() - lastFixAt > 30_000 && Date.now() - lastWatchStartAt > 30_000) startWatch();
+      const lastAccepted = Math.max(lastFixAt, currentGpsPositionRef.current?.timestamp ?? 0);
+      if (document.hidden || permissionDenied || manualGpsRetryRef.current || fallbackPending || Date.now() - lastAccepted < 8_000) return;
+      if (Date.now() - lastAccepted > 30_000 && Date.now() - lastWatchStartAt > 30_000) startWatch();
       fallbackPending = true;
       fallbackStartedAt = Date.now();
       navigator.geolocation.getCurrentPosition(
@@ -3917,8 +3924,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
     };
     const acceptPosition = (position: GeolocationPosition) => {
         const point = { lat: position.coords.latitude, lng: position.coords.longitude, label: "Sua localização" };
-        if (!isValidCoordinates(point)) {
-          setGpsStatus("O GPS retornou coordenadas inválidas.");
+        const issue = driverGpsSampleIssue(position);
+        if (issue) {
+          setGpsStatus(issue === "timestamp" ? "Posição antiga ou horário inválido. Aguardando dados atuais do GPS." : "O GPS retornou uma localização inválida.");
           finish();
           return;
         }
@@ -4078,13 +4086,14 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const navigationRoute = useMemo(() => routePoints(navGeometry), [navGeometry]);
   const navigationTargetPoint = useMemo(() => targetLat !== undefined && targetLng !== undefined
     ? { lat: targetLat, lng: targetLng } : null, [targetLat, targetLng]);
-  const navigationProgress = liveLocation && navigationRoute.length > 1
-    ? routeProgress(liveLocation, navigationRoute) : null;
+  const navigationProgress = useMemo(() => liveLocation && navigationRoute.length > 1
+    ? routeProgress(liveLocation, navigationRoute) : null, [liveLocation, navigationRoute]);
   const offRouteMeters = navigationProgress?.offRouteMeters;
-  const upcomingManeuver = liveLocation && navEta?.steps
-    ? nextManeuver(liveLocation, navigationRoute, navEta.steps) : null;
-  const distanceToTarget = liveLocation && navigationTargetPoint
-    ? metersBetween(liveLocation, navigationTargetPoint) : Infinity;
+  const navigationSteps = navEta?.steps;
+  const upcomingManeuver = useMemo(() => liveLocation && navigationSteps
+    ? nextManeuver(liveLocation, navigationRoute, navigationSteps) : null, [liveLocation, navigationRoute, navigationSteps]);
+  const distanceToTarget = useMemo(() => liveLocation && navigationTargetPoint
+    ? metersBetween(liveLocation, navigationTargetPoint) : Infinity, [liveLocation, navigationTargetPoint]);
   const noShowRemaining = ride?.status === "motorista_chegou" && ride.arrival_server_at
     ? Math.max(0, backend.cancellationPolicy.no_show_seconds - Math.floor((navClock - Date.parse(ride.arrival_server_at)) / 1000))
     : null;
@@ -4098,7 +4107,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
     : navSample.accuracy > 80
       ? `GPS com precisão de ${Math.round(navSample.accuracy)} m. Aguarde uma posição mais precisa.`
       : gpsStatus;
-  const arrivalReady = Boolean(ride?.status === "motorista_a_caminho" && liveLocation && navSample &&
+  const arrivalReady = Boolean(ride?.status === "motorista_a_caminho" && liveLocation && navSample && !gpsWeak &&
     navSample.accuracy <= 40 && distanceToTarget <= backend.cancellationPolicy.arrival_radius_meters);
   const navDestination = useMemo(() => targetLat !== undefined && targetLng !== undefined
     ? { lat: targetLat, lng: targetLng, label: navPhase === "pickup" ? isDelivery ? "Retirada" : "Passageiro" : isDelivery ? "Entrega" : "Destino" }
@@ -4419,7 +4428,11 @@ function DriverPanel({ backend }: { backend: Backend }) {
       setGpsExpanded(true);
       setFollowDriver(true);
       await backend.refresh();
-      void prepareNavigationForRide(acceptedOffer.ride).catch(() => {
+      void (async () => {
+        const acceptedRide = acceptedOffer.ride.market_order_id ? (await backend.getRideSnapshot()).ride : acceptedOffer.ride;
+        if (!acceptedRide || acceptedRide.id !== acceptedOffer.ride_id) return;
+        await prepareNavigationForRide(acceptedRide);
+      })().catch(() => {
         if (rideIdRef.current === acceptedOffer.ride_id)
           setNotice("Corrida aceita. Não foi possível salvar o mapa offline agora; a navegação online continua disponível.");
       });
@@ -4495,7 +4508,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
       setCancelReason("");
       setCancelOther("");
       setOfflineConflict("");
-      setNotice("Corrida cancelada. O passageiro está procurando outro motorista.");
+      setNotice(isMarketDelivery ? "Desistência registrada. O pedido continua em busca de entregador." : "Corrida cancelada. O passageiro está procurando outro motorista.");
       await clearOfflineRide(cancellingRideId).catch(() => undefined);
       await backend.refresh().catch(() => undefined);
       await backend.refreshDriverQueue().catch(() => undefined);
@@ -4514,7 +4527,14 @@ function DriverPanel({ backend }: { backend: Backend }) {
     const endingRideId = ride.id;
     setBusy(true);
     try {
-      await backend.endRideEarly(endingRideId, earlyEndReason.trim());
+      const result = await backend.endRideEarly(endingRideId, earlyEndReason.trim());
+      if (result.exception) {
+        setEarlyEndOpen(false);
+        setEarlyEndReason("");
+        setNotice("Ocorrência registrada. Aguarde as instruções da central; a entrega continua vinculada a você.");
+        await backend.refresh().catch(() => undefined);
+        return;
+      }
       setOfflinePackage(null);
       setGpsExpanded(false);
       setEarlyEndOpen(false);
@@ -4529,6 +4549,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
   }
   async function advance() {
     if (!ride) return;
+    if (marketOnHold) { setNotice("Aguarde a central resolver a ocorrência."); return; }
+    if (isMarketDelivery && connectivity === "OFFLINE") { setNotice("Conecte-se para confirmar uma etapa da entrega de Compras."); return; }
     if (offlineConflict) { setNotice(offlineConflict); return; }
     const next: Record<string, string> = {
       aceita: "motorista_a_caminho",
@@ -4554,14 +4576,16 @@ function DriverPanel({ backend }: { backend: Backend }) {
         });
         const pickup = { lat: ride.origin_lat, lng: ride.origin_lng };
         const actual = { lat: arrivalPosition.coords.latitude, lng: arrivalPosition.coords.longitude };
-        if (Date.now() - arrivalPosition.timestamp > 30_000 || !Number.isFinite(arrivalPosition.coords.accuracy) || arrivalPosition.coords.accuracy > 40 ||
-          !isValidCoordinates(actual) || metersBetween(actual, pickup) > backend.cancellationPolicy.arrival_radius_meters)
+        if (driverGpsSampleIssue(arrivalPosition) || arrivalPosition.coords.accuracy > 40 ||
+          metersBetween(actual, pickup) > backend.cancellationPolicy.arrival_radius_meters)
           throw new Error("GPS sem precisão suficiente ou fora do embarque. Tente novamente ao chegar.");
-        currentGpsPositionRef.current = arrivalPosition;
-        lastGpsTimestampRef.current = Math.max(lastGpsTimestampRef.current, arrivalPosition.timestamp);
-        setLiveLocation({ ...actual, label: "Sua localização" });
-        setNavSample({ accuracy: arrivalPosition.coords.accuracy, speed: arrivalPosition.coords.speed,
-          heading: arrivalPosition.coords.heading, timestamp: arrivalPosition.timestamp });
+        if (arrivalPosition.timestamp > lastGpsTimestampRef.current) {
+          currentGpsPositionRef.current = arrivalPosition;
+          lastGpsTimestampRef.current = arrivalPosition.timestamp;
+          setLiveLocation({ ...actual, label: "Sua localização" });
+          setNavSample({ accuracy: arrivalPosition.coords.accuracy, speed: arrivalPosition.coords.speed,
+            heading: arrivalPosition.coords.heading, timestamp: arrivalPosition.timestamp });
+        }
       }
       const offlineType: OfflineEventType | null = status === "motorista_chegou" ? "ARRIVED_AT_PICKUP"
         : status === "em_corrida" ? "RIDE_STARTED" : status === "finalizada" ? "RIDE_COMPLETED" : null;
@@ -4580,6 +4604,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
           if (arrivalPosition || error instanceof BackendApiError) throw error;
         }
       }
+      if (isMarketDelivery) throw new Error("Etapa ainda não confirmada. Sincronize e confira o estado da entrega antes de tentar novamente.");
       if (!offlineType || !currentOfflinePackage || !currentOfflinePackage.mapReady || !currentOfflinePackage.routeToPickup || !currentOfflinePackage.routeToDestination)
         throw new Error("Pacote offline incompleto. Aguarde a conexão antes de alterar esta corrida.");
       const updated = await queueOfflineTransition(ride.id, offlineType,
@@ -4603,9 +4628,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
   const origin = useMemo(() => shownRide
     ? { lat: shownRide.origin_lat, lng: shownRide.origin_lng, label: shownRide.origin_address }
     : undefined, [shownRide]);
-  const destination = useMemo(() => shownRide
+  const destination = useMemo(() => shownRide && (!shownRide.market_order_id || ride) && isValidCoordinates({ lat: shownRide.destination_lat, lng: shownRide.destination_lng })
     ? { lat: shownRide.destination_lat, lng: shownRide.destination_lng, label: shownRide.destination_address }
-    : undefined, [shownRide]);
+    : undefined, [ride, shownRide]);
   const route = useMemo(() => routePoints(shownRide?.route_geometry), [shownRide?.route_geometry]);
   const navigationTarget = ride
     ? externalNavigationTarget(ride.status, ride)
@@ -4909,7 +4934,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
             <span>GANHOS DA SEMANA</span>
             <strong>{backend.driverHistory && !backend.driverHistoryLoading ? money(backend.driverHistory.totals.weekCents) : "—"}</strong>
             <small>Valor bruto das corridas concluídas</small>
-          </div> : <div className="driver-subpage-intro"><History aria-hidden="true" /><h2>Suas corridas</h2><p>Confira suas corridas concluídas e os pagamentos.</p></div>}
+          </div> : <div className="driver-subpage-intro"><History aria-hidden="true" /><h2>Suas corridas</h2><p>Confira suas corridas concluídas e os pagamentos.</p><Link href="/motorista/compras">Entregas e recebimentos de Compras</Link></div>}
           <div className="driver-earnings-body">
             {backend.driverHistoryLoading ? <div className="driver-subpage-state" role="status">Carregando suas corridas…</div>
               : backend.driverHistoryError ? <div className="driver-subpage-state is-error" role="alert"><p>{backend.driverHistoryError}</p><button type="button" onClick={() => void backend.reloadDriverHistory()}>Tentar novamente</button></div>
@@ -4993,8 +5018,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
             </div>
             <div className="driver-nav-floats">
               <button type="button" aria-label={voiceOn ? "Desligar orientação por voz" : "Ligar orientação por voz"} onClick={() => { if (voiceOn) window.speechSynthesis?.cancel(); announcedRef.current.clear(); setVoiceOn(!voiceOn); }}>{voiceOn ? <Volume2 /> : <VolumeX />}</button>
-              <button type="button" aria-label={isDelivery ? "Mensagem ao solicitante" : "Mensagem ao passageiro"} onClick={() => setContactOpen(true)}><MessageCircle /></button>
-              {ride.passenger?.phone && <a href={`tel:${ride.passenger.phone}`} aria-label={isDelivery ? "Ligar para o solicitante" : "Ligar para o passageiro"}><Phone /></a>}
+              <button type="button" aria-label={isMarketDelivery ? "Contato do destinatário" : isDelivery ? "Mensagem ao solicitante" : "Mensagem ao passageiro"} onClick={() => setContactOpen(true)}><MessageCircle /></button>
+              {rideContactPhone && <a href={`tel:${rideContactPhone}`} aria-label={isMarketDelivery ? "Ligar para o destinatário" : isDelivery ? "Ligar para o solicitante" : "Ligar para o passageiro"}><Phone /></a>}
             </div>
             <button type="button" className={`driver-nav-center ${followDriver ? "is-following" : ""}`} aria-label="Centralizar mapa no motorista" onClick={() => {
               setFollowDriver(true);
@@ -5007,14 +5032,16 @@ function DriverPanel({ backend }: { backend: Backend }) {
                 <span>{ride.status === "aceita" ? "Solicitação aceita · preparando rota" : ride.status === "motorista_chegou" ? isDelivery ? "Aguardando a retirada" : "Aguardando passageiro" : navPhase === "pickup" ? isDelivery ? "Indo retirar o pedido" : "Indo buscar o passageiro" : isDelivery ? "Em entrega para o destino" : "Em corrida para o destino"}</span>
               </div>
               {isDelivery && <details className="driver-delivery-details"><summary>Ver dados da entrega e destinatário</summary><RideServiceSummary ride={ride} compact /></details>}
+              {ride.market_order_id && driverId && ride.status === "em_corrida" && !marketOnHold && <details className="driver-delivery-details"><summary>Valor a receber na entrega</summary><DriverMarketReceipt key={ride.market_order_id} orderId={ride.market_order_id} userId={driverId} collectible={false} /></details>}
+              {marketOnHold && <p className="driver-nav-notice" role="status">Ocorrência aberta. Aguarde instruções da central.</p>}
               {navPhase === "trip" && connectivity === "ONLINE" && Number(ride.tracked_distance_meters) > 0 && <div className="driver-nav-trip">Percorrido pelo GPS: {(Number(ride.tracked_distance_meters) / 1000).toFixed(2).replace(".", ",")} km</div>}
               <div className="driver-nav-actions">
                 <button type="button" className="driver-nav-primary"
-                  disabled={busy}
+                  disabled={busy || marketOnHold}
                   onClick={advance}>{ride.status === "aceita" ? isDelivery ? "Ir até retirada" : "Ir até passageiro" : ride.status === "motorista_a_caminho" ? "Cheguei" : ride.status === "motorista_chegou" ? isDelivery ? "Retirei o pedido" : "Iniciar corrida" : isDelivery ? "Confirmar entrega" : "Finalizar corrida"}</button>
               </div>
               {ride.status !== "em_corrida" && <button type="button" className="driver-nav-fallback" disabled={busy} onClick={() => setCancelStep(1)}>Cancelar corrida</button>}
-              {ride.status === "em_corrida" && <button type="button" className="driver-nav-fallback" disabled={busy} onClick={() => setEarlyEndOpen(true)}>Encerrar viagem antecipadamente</button>}
+              {ride.status === "em_corrida" && !marketOnHold && <button type="button" className="driver-nav-fallback" disabled={busy} onClick={() => setEarlyEndOpen(true)}>{isMarketDelivery ? "Registrar ocorrência" : "Encerrar viagem antecipadamente"}</button>}
               {ride.status === "motorista_a_caminho" && distanceToTarget > backend.cancellationPolicy.arrival_radius_meters &&
                 <p className="driver-nav-notice">Chegue a até {backend.cancellationPolicy.arrival_radius_meters} m {isDelivery ? "do local de retirada" : "do embarque"} para confirmar.</p>}
               {ride.status === "motorista_a_caminho" && distanceToTarget <= backend.cancellationPolicy.arrival_radius_meters && !arrivalReady &&
@@ -5027,12 +5054,12 @@ function DriverPanel({ backend }: { backend: Backend }) {
             </div>
             {contactOpen && <div className="driver-contact-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setContactOpen(false); }}>
               <section className="driver-contact-sheet" role="dialog" aria-modal="true" aria-labelledby="driver-contact-title">
-                <header><div><small>CONTATO DA CORRIDA</small><h2 id="driver-contact-title">{ride.passenger?.full_name || "Passageiro"}</h2></div><button type="button" onClick={() => setContactOpen(false)} aria-label="Fechar contato"><X /></button></header>
-                <p>Use uma ligação ou mensagem para combinar o embarque. Volte ao mapa antes de seguir viagem.</p>
-                {ride.passenger?.phone ? <div className="driver-contact-actions">
-                  <a href={`tel:${ride.passenger.phone}`}><Phone /> Ligar</a>
-                  <a href={`sms:${ride.passenger.phone}`}><MessageCircle /> Enviar SMS</a>
-                </div> : <p>O telefone do passageiro não está disponível nesta corrida.</p>}
+                <header><div><small>{isMarketDelivery ? "CONTATO DA ENTREGA" : "CONTATO DA CORRIDA"}</small><h2 id="driver-contact-title">{rideContactName || (isMarketDelivery ? "Destinatário" : "Passageiro")}</h2></div><button type="button" onClick={() => setContactOpen(false)} aria-label="Fechar contato"><X /></button></header>
+                <p>{isMarketDelivery ? "Use uma ligação ou mensagem para combinar a entrega." : "Use uma ligação ou mensagem para combinar o embarque."} Volte ao mapa antes de seguir viagem.</p>
+                {rideContactPhone ? <div className="driver-contact-actions">
+                  <a href={`tel:${rideContactPhone}`}><Phone /> Ligar</a>
+                  <a href={`sms:${rideContactPhone}`}><MessageCircle /> Enviar SMS</a>
+                </div> : <p>O telefone não está disponível neste serviço.</p>}
                 {ride.status !== "em_corrida" && <button type="button" className="driver-contact-cancel" disabled={busy} onClick={() => { setContactOpen(false); setCancelStep(1); }}>Cancelar corrida</button>}
               </section>
             </div>}
@@ -5115,8 +5142,9 @@ function DriverPanel({ backend }: { backend: Backend }) {
           <div className="offer-card">
             <div className="offer-head">
               <div>
-                <span>{getRideService(offer.ride.service_type).id === "passenger" ? "NOVA CORRIDA" : `NOVA ENTREGA · ${getRideService(offer.ride.service_type).label.toUpperCase()}`}</span>
+                <span>{offer.ride.market_order_id ? "ENTREGA · COMPRAS" : getRideService(offer.ride.service_type).id === "passenger" ? "NOVA CORRIDA" : `NOVA ENTREGA · ${getRideService(offer.ride.service_type).label.toUpperCase()}`}</span>
                 <h2>{offer.passenger_name}</h2>
+                {offer.ride.market_dispatch_source && <small>{offer.ride.market_dispatch_source === "preferred" ? "Oferta da sua loja vinculada" : "Oferta da rede de entregadores"}</small>}
               </div>
               <b>{offerSeconds}s</b>
             </div>
@@ -5140,11 +5168,11 @@ function DriverPanel({ backend }: { backend: Backend }) {
             </div>
             <div className="offer-numbers">
               <div>
-                <small>Distância</small>
-                <b>{(offer.ride.distance_meters / 1000).toFixed(1)} km</b>
+                <small>{offer.ride.market_order_id ? "Distância até a retirada (linha reta)" : "Distância"}</small>
+                <b>{offer.ride.market_order_id ? typeof offer.distance_to_pickup_meters === "number" ? `${(offer.distance_to_pickup_meters / 1000).toFixed(1)} km` : "Indisponível" : `${(offer.ride.distance_meters / 1000).toFixed(1)} km`}</b>
               </div>
               <div>
-                <small>Valor</small>
+                <small>{offer.ride.market_order_id ? "Frete" : "Valor"}</small>
                 <b>{money(offer.ride.fare_cents)}</b>
               </div>
             </div>
@@ -5165,17 +5193,17 @@ function DriverPanel({ backend }: { backend: Backend }) {
             <h2>{getRideService(completedRide.service_type).id === "passenger" ? "Corrida finalizada!" : "Entrega concluída!"}</h2>
             <RideServiceSummary ride={completedRide} compact />
             {queuePosition && <p className="driver-queue-return">Você retornou automaticamente para a fila. Nova posição: <b>{queuePosition}º</b>. {queue?.ahead} {queue?.ahead === 1 ? "motorista está" : "motoristas estão"} na sua frente.</p>}
-            <div className="completion-route">
+            {!completedRide.market_order_id && <div className="completion-route">
               <span>{completedRide.origin_address}</span>
               <i>→</i>
               <span>{completedRide.destination_address}</span>
-            </div>
-            <div className="completion-grid">
+            </div>}
+            {completedRide.market_order_id && driverId ? <DriverMarketReceipt key={completedRide.market_order_id} orderId={completedRide.market_order_id} userId={driverId} /> : <div className="completion-grid">
               <div><small>Valor</small><b>{money(completedRide.final_fare_cents ?? completedRide.fare_cents)}</b></div>
               <div><small>Pagamento</small><b>{completedRide.payment_method === "cash" ? "Dinheiro" : "Pix"}</b></div>
               <div><small>Distância</small><b>{completedRide.actual_distance_meters == null ? "A confirmar" : `${(completedRide.actual_distance_meters / 1000).toFixed(2).replace(".", ",")} km`}</b></div>
               <div><small>Duração</small><b>{durationLabel(completedRide.actual_duration_seconds)}</b></div>
-            </div>
+            </div>}
             <Button type="button" onClick={backend.dismissCompletedRide}>OK</Button>
           </div>
         )}
@@ -5190,14 +5218,14 @@ function DriverPanel({ backend }: { backend: Backend }) {
             </span>
             <div className="passenger-row">
               <div className="passenger-avatar">
-                {initials(ride.passenger?.full_name || "Passageiro")}
+                {initials(rideContactName || (isMarketDelivery ? "Destinatário" : "Passageiro"))}
               </div>
               <div>
-                <b>{ride.passenger?.full_name || "Passageiro"}</b>
-                <small>{isDelivery ? `Solicitante · ${getRideService(ride.service_type).label}` : "Corrida protegida"}</small>
+                <b>{rideContactName || (isMarketDelivery ? "Destinatário" : "Passageiro")}</b>
+                <small>{isMarketDelivery ? "Destinatário · Compras" : isDelivery ? `Solicitante · ${getRideService(ride.service_type).label}` : "Corrida protegida"}</small>
               </div>
-              {ride.passenger?.phone && (
-                <a href={`tel:${ride.passenger.phone}`} aria-label="Ligar">
+              {rideContactPhone && (
+                <a href={`tel:${rideContactPhone}`} aria-label="Ligar">
                   <Phone />
                 </a>
               )}
@@ -5206,6 +5234,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
               </button>
             </div>
             <RideServiceSummary ride={ride} compact />
+            {ride.market_order_id && driverId && ride.status === "em_corrida" && !marketOnHold && <details className="driver-delivery-details"><summary>Valor a receber na entrega</summary><DriverMarketReceipt key={ride.market_order_id} orderId={ride.market_order_id} userId={driverId} collectible={false} /></details>}
+            {marketOnHold && <p className="driver-nav-notice" role="status">Ocorrência aberta. Aguarde instruções da central.</p>}
             <div className="job-address">
               <Navigation />
               <div>
@@ -5255,8 +5285,8 @@ function DriverPanel({ backend }: { backend: Backend }) {
                   CANCELAR
                 </Button>
               )}
-              {ride.status === "em_corrida" && <Button disabled={busy} variant="outline" onClick={() => setEarlyEndOpen(true)}>ENCERRAR ANTECIPADAMENTE</Button>}
-              <Button disabled={busy} className="primary-cta" onClick={advance}>
+              {ride.status === "em_corrida" && !marketOnHold && <Button disabled={busy} variant="outline" onClick={() => setEarlyEndOpen(true)}>{isMarketDelivery ? "REGISTRAR OCORRÊNCIA" : "ENCERRAR ANTECIPADAMENTE"}</Button>}
+              <Button disabled={busy || marketOnHold} className="primary-cta" onClick={advance}>
                 {ride.status === "aceita"
                   ? isDelivery ? "IR ATÉ RETIRADA" : "IR ATÉ PASSAGEIRO"
                   : ride.status === "motorista_a_caminho"
@@ -5363,6 +5393,7 @@ export default function Home() {
               <Link href="/passageiro/corridas">
                 <History /> Minhas corridas
               </Link>
+              <Link href="/compras"><ShoppingCart /> Compras</Link>
               <Link href="/passageiro/cupons">
                 <Ticket /> Cupons
               </Link>
@@ -5394,6 +5425,7 @@ export default function Home() {
               <Link href="/passageiro/corridas">
                 <History /> Minhas corridas
               </Link>
+              <Link href="/compras"><ShoppingCart /> Compras</Link>
               <Link href="/passageiro/cupons">
                 <Ticket /> Cupons
               </Link>
@@ -5441,6 +5473,8 @@ export default function Home() {
           </summary>
           <div>
             {role === "passenger" && <button type="button" onClick={() => document.dispatchEvent(new Event("moto-syxp:open-profile"))}>Central do Passageiro</button>}
+            <Link href="/comerciante">Painel do comerciante</Link>
+            {role === "admin" && <Link href="/admin/marketplace">Administrar Compras</Link>}
             <a href="/?conta=2" target="_blank" rel="noopener noreferrer" onClick={prepareOtherAccountLink}>Abrir outra conta em nova aba</a>
             <button onClick={() => backend.signOut()}>Sair da conta</button>
           </div>
