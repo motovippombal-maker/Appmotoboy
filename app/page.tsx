@@ -2372,6 +2372,10 @@ function PassengerPanel({ backend }: { backend: Backend }) {
           <Link href="/compras"><ShoppingCart size={18} /> Compras</Link>
         </nav>{serviceType !== "passenger" && <RideServicePicker value={serviceType} onChange={changeService} disabled={busy} deliveriesOnly />}</>}
         {stage === "draft" && <div className="passenger-home-sheet">
+          <div className="passenger-service-gateway" aria-label="Serviços MotoPombal">
+            <button type="button" onClick={() => { changeService("passenger"); setDestinationSearchOpen(true); }}><Bike /><span><b>Pedir moto</b><small>Seu transporte rápido e seguro pela cidade.</small></span></button>
+            <Link href="/delivery"><Utensils /><span><b>Pedir comida</b><small>Seus restaurantes favoritos entregues na sua porta.</small></span></Link>
+          </div>
           <h1>{isDelivery ? "O que vamos entregar?" : "Para onde vamos?"}</h1>
           <button type="button" className="passenger-home-search" onClick={() => setDestinationSearchOpen(true)}><Search /><span>{isDelivery ? "Definir retirada e entrega" : "Digite seu destino"}</span><ChevronRight /></button>
           <div className="passenger-home-saved" aria-label="Lugares favoritos">
@@ -5393,6 +5397,7 @@ export default function Home() {
               <Link href="/passageiro/corridas">
                 <History /> Minhas corridas
               </Link>
+              <Link href="/delivery"><Utensils /> Pedir comida</Link>
               <Link href="/compras"><ShoppingCart /> Compras</Link>
               <Link href="/passageiro/cupons">
                 <Ticket /> Cupons
@@ -5425,6 +5430,7 @@ export default function Home() {
               <Link href="/passageiro/corridas">
                 <History /> Minhas corridas
               </Link>
+              <Link href="/delivery"><Utensils /> Pedir comida</Link>
               <Link href="/compras"><ShoppingCart /> Compras</Link>
               <Link href="/passageiro/cupons">
                 <Ticket /> Cupons
@@ -5473,6 +5479,10 @@ export default function Home() {
           </summary>
           <div>
             {role === "passenger" && <button type="button" onClick={() => document.dispatchEvent(new Event("moto-syxp:open-profile"))}>Central do Passageiro</button>}
+            {role === "passenger" && <Link href="/delivery">Pedir comida</Link>}
+            {role === "driver" && <Link href="/motorista/entregas">Entregas de restaurantes</Link>}
+            {role === "admin" && <Link href="/admin/delivery">Administrar delivery</Link>}
+            <Link href="/restaurante">Painel do restaurante</Link>
             <Link href="/comerciante">Painel do comerciante</Link>
             {role === "admin" && <Link href="/admin/marketplace">Administrar Compras</Link>}
             <a href="/?conta=2" target="_blank" rel="noopener noreferrer" onClick={prepareOtherAccountLink}>Abrir outra conta em nova aba</a>

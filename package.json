@@ -11,6 +11,7 @@
     "build": "node scripts/run-framework.mjs build",
     "build:vercel": "npm run check:vercel-env && node scripts/stamp-service-worker.mjs && next build",
     "test:rides": "node --test tests/ride-lifecycle.integration.mjs",
+    "test:delivery": "tsx --test tests/delivery-hours.test.ts tests/restaurant-delivery.integration.mjs",
     "test:services": "tsx --test tests/ride-service.test.ts",
     "test:marketplace": "tsx --test --test-concurrency=1 tests/marketplace-checkout.test.ts tests/marketplace-cart.test.ts tests/marketplace-management.test.ts tests/marketplace-dispatch-contract.test.mjs tests/marketplace-schema-compat.test.ts tests/push-delivery-policy.test.ts tests/marketplace-operation-mode.test.mjs",
     "test:marketplace:db": "node --test tests/marketplace.integration.mjs",

@@ -206,3 +206,11 @@
   .app-role-passenger .ride-sheet > #delivery-request-details { margin-top: 16px; }
   .app-role-passenger .ride-sheet > #delivery-request-details .ride-delivery-form { margin-bottom: 14px; }
 }
+/* Entrada do delivery de restaurantes sem alterar o seletor de fretes avulsos. */
+.passenger-service-gateway { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:6px 0 16px }
+.passenger-service-gateway button,.passenger-service-gateway a { display:flex;align-items:center;gap:9px;min-width:0;text-align:left;text-decoration:none;background:#fff;color:#10233f;border:1px solid #d9e5f4;border-radius:13px;padding:11px;box-shadow:0 3px 12px #071c3912 }
+.passenger-service-gateway svg { width:22px;height:22px;flex:none;color:#0876f9 }
+.passenger-service-gateway span { display:flex;flex-direction:column;min-width:0 }
+.passenger-service-gateway b { font-size:13px }
+.passenger-service-gateway small { font-size:10px;line-height:1.3;color:#657b97 }
+@media(max-width:400px) { .passenger-service-gateway { gap:6px }.passenger-service-gateway button,.passenger-service-gateway a { padding:8px;gap:5px }.passenger-service-gateway svg { width:18px;height:18px } }

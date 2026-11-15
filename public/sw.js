@@ -1,4 +1,4 @@
-const SW_BUILD_ID = "41adef051eb8";
+const SW_BUILD_ID = "5192d7f98143";
 const SHELL_CACHE = `moto-pombal-shell-${SW_BUILD_ID}`;
 const STATIC_CACHE = `moto-pombal-static-${SW_BUILD_ID}`;
 const REGION_CACHE = "moto-pombal-region-packages";

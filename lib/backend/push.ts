@@ -124,6 +124,12 @@ export async function dispatchPushQueue(limit = 50, targetNotificationIds?: stri
         type: notification.type,
         url: offerPush
           ? `/?open=driver-offer&ride=${encodeURIComponent(offerPush.rideId)}`
+          : notification.type.startsWith("food.driver.")
+            ? "/motorista/entregas"
+          : notification.type.startsWith("food.restaurant.")
+            ? "/restaurante"
+          : notification.type.startsWith("food.customer.")
+            ? "/delivery"
           : notification.type.startsWith("queue.")
             ? "/?open=driver-queue"
           : "/?open=notifications",
