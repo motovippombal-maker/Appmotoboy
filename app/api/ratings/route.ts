@@ -1,12 +1,17 @@
 import { z } from "zod";
 import { ApiError, audit, consumeRateLimit, jsonError, requireUser } from "@/lib/backend/api";
+import { readWithPreMarketplaceFallback } from "@/lib/backend/marketplace-schema";
 const schema = z.object({ rideId: z.string().uuid(), score: z.number().int().min(1).max(5), comment: z.string().max(500).optional() });
 export async function POST(request: Request) {
   try {
     const { supabase, user } = await requireUser(request, ["passenger"]);
     await consumeRateLimit(supabase, `rating:${user.id}`, 10, 60);
     const input = schema.parse(await request.json());
-    const { data: ride } = await supabase.from("rides").select("passenger_id, driver_id, status").eq("id", input.rideId).single();
+    const readRide = <Fields extends string>(fields: Fields) => supabase.from("rides").select(fields).eq("id", input.rideId);
+    const { data: ride, error: rideError } = await readWithPreMarketplaceFallback("market_order_id",
+      () => readRide("passenger_id, driver_id, status").is("market_order_id", null).maybeSingle(),
+      () => readRide("*").maybeSingle());
+    if (rideError) throw rideError;
     if (!ride || ride.status !== "finalizada") throw new ApiError(409, "A corrida precisa estar finalizada para ser avaliada.", "RIDE_NOT_FINISHED");
     if (ride.passenger_id !== user.id || !ride.driver_id) throw new ApiError(403, "Somente o passageiro desta corrida pode avaliar o motorista.", "FORBIDDEN");
     const { error } = await supabase.from("ratings").insert({ ride_id: input.rideId, rater_id: user.id, rated_id: ride.driver_id, score: input.score, comment: input.comment });

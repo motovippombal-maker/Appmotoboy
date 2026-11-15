@@ -2,6 +2,7 @@ import { jsonError, requireUser } from "@/lib/backend/api";
 import { expireRideSearches, getDispatchSettings } from "@/lib/backend/dispatch";
 import { distanceKm } from "@/lib/backend/routing";
 import { parseCancellationPolicy } from "@/lib/backend/cancellation-policy";
+import { readWithPreMarketplaceFallback } from "@/lib/backend/marketplace-schema";
 
 async function signedAvatar(supabase: Awaited<ReturnType<typeof requireUser>>["supabase"], path?: string | null) {
   if (!path) return null;
@@ -14,7 +15,14 @@ export async function GET(request: Request) {
     const { supabase, user, profile } = await requireUser(request, ["passenger", "driver"], { allowBlocked: true });
     await expireRideSearches(supabase);
     const ownerColumn = profile.role === "driver" ? "driver_id" : "passenger_id";
-    const { data: activeRide, error } = await supabase.from("rides").select("*").eq(ownerColumn, user.id).not("status", "in", "(finalizada,cancelada)").order("created_at", { ascending: false }).limit(1).maybeSingle();
+    const visibleRides = (useMarketColumn: boolean) => {
+      const query = supabase.from("rides").select("*").eq(ownerColumn, user.id);
+      return useMarketColumn && profile.role === "passenger" ? query.is("market_order_id", null) : query;
+    };
+    const readActiveRide = (useMarketColumn: boolean) => visibleRides(useMarketColumn)
+      .not("status", "in", "(finalizada,cancelada)").order("created_at", { ascending: false }).limit(1).maybeSingle();
+    const { data: activeRide, error } = await readWithPreMarketplaceFallback("market_order_id",
+      () => readActiveRide(true), () => readActiveRide(false));
     if (error) throw error;
     const { data: policySetting } = await supabase.from("system_settings").select("value")
       .eq("key", "cancellation_policy").maybeSingle();
@@ -24,22 +32,29 @@ export async function GET(request: Request) {
     if (!activeRide) {
       // Only the latest finished ride may produce the completion card. An
       // older completed ride must not reappear after a newer cancellation.
-      const latestTerminalQuery = supabase.from("rides").select("*")
-        .eq(ownerColumn, user.id)
+      const latestTerminalQuery = (useMarketColumn: boolean) => visibleRides(useMarketColumn)
         .in("status", ["finalizada", "cancelada"])
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      const { data: latestTerminal, error: terminalError } = await latestTerminalQuery;
+      const { data: latestTerminal, error: terminalError } = await readWithPreMarketplaceFallback("market_order_id",
+        () => latestTerminalQuery(true), () => latestTerminalQuery(false));
       if (terminalError) throw terminalError;
       completedRide = latestTerminal?.status === "finalizada" ? latestTerminal : null;
       if (profile.role === "driver") {
-        const { data: cancelled, error: cancelledError } = await supabase.from("rides")
-          .select("id,driver_id,passenger_id,status,cancelled_at,cancelled_by,cancellation_fee_cents,cancellation_fee_reason")
+        const cancelledRides = <Fields extends string>(fields: Fields) => supabase.from("rides")
+          .select(fields)
           .eq("driver_id", user.id).eq("status", "cancelada")
-          .order("cancelled_at", { ascending: false }).limit(1).maybeSingle();
+          .order("cancelled_at", { ascending: false }).limit(1);
+        const { data: cancelled, error: cancelledError } = await readWithPreMarketplaceFallback("market_order_id",
+          () => cancelledRides("id,driver_id,passenger_id,status,cancelled_at,cancelled_by,cancellation_fee_cents,cancellation_fee_reason")
+            .is("market_order_id", null).maybeSingle(),
+          () => cancelledRides("*").maybeSingle());
         if (cancelledError) throw cancelledError;
-        cancelledRide = cancelled;
+        if (cancelled) {
+          const { id, driver_id, passenger_id, status, cancelled_at, cancelled_by, cancellation_fee_cents, cancellation_fee_reason } = cancelled;
+          cancelledRide = { id, driver_id, passenger_id, status, cancelled_at, cancelled_by, cancellation_fee_cents, cancellation_fee_reason };
+        }
       }
     }
     const ride = activeRide || completedRide;
@@ -74,7 +89,9 @@ export async function GET(request: Request) {
       }
     }
 
-    const { data: passengerProfile } = await supabase.from("profiles").select("full_name,phone").eq("id", ride.passenger_id).single();
+    const { data: passengerProfile } = ride.market_order_id
+      ? { data: null }
+      : await supabase.from("profiles").select("full_name,phone").eq("id", ride.passenger_id).single();
     let trackedDistanceMeters = 0;
     if (ride.status === "em_corrida") {
       const { data: points } = await supabase.from("ride_location_points").select("latitude,longitude").eq("ride_id", ride.id).eq("accepted", true).order("recorded_at").order("id").limit(2000);
@@ -85,7 +102,16 @@ export async function GET(request: Request) {
         ) * 1000);
       }
     }
-    const hydratedRide = { ...ride, tracked_distance_meters: trackedDistanceMeters, driver, passenger: passengerProfile || null };
+    // After handoff the driver only needs an identifier for the receipt, not
+    // the customer, address, route geometry, or former recipient contact.
+    const hydratedRide = ride.market_order_id && completedRide ? {
+      id: ride.id, status: ride.status, driver_id: ride.driver_id, created_at: ride.created_at, completed_at: ride.completed_at,
+      market_order_id: ride.market_order_id, market_dispatch_source: ride.market_dispatch_source,
+      service_type: ride.service_type, service_details: { description: "Pedido de compras" },
+    } : {
+      ...ride, ...(ride.market_order_id ? { passenger_id: undefined } : {}),
+      tracked_distance_meters: trackedDistanceMeters, driver, passenger: passengerProfile || null,
+    };
     return Response.json({ ride: activeRide ? hydratedRide : null, completedRide: completedRide ? hydratedRide : null, cancelledRide, driverLocation: activeRide ? driverLocation : null, cancellationPolicy });
   } catch (error) { return jsonError(error); }
 }

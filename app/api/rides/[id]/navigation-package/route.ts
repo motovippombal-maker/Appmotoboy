@@ -33,9 +33,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       point ? calculateRoute(point, pickup, true) : Promise.resolve(null),
       calculateRoute(pickup, destination, true),
     ]);
-    const { data: passenger } = await supabase.from("profiles").select("full_name,phone").eq("id", ride.passenger_id).maybeSingle();
+    const { data: passenger } = ride.market_order_id
+      ? { data: null }
+      : await supabase.from("profiles").select("full_name,phone").eq("id", ride.passenger_id).maybeSingle();
     return Response.json({
-      ride: { ...ride, passenger: passenger ? { full_name: passenger.full_name, phone: passenger.phone } : undefined },
+      ride: { ...ride, ...(ride.market_order_id ? { passenger_id: undefined } : {}),
+        passenger: passenger ? { full_name: passenger.full_name, phone: passenger.phone } : undefined },
       routeToPickup: toPickup.status === "fulfilled" && toPickup.value ? { phase: "pickup", ...toPickup.value } : null,
       routeToDestination: toDestination.status === "fulfilled" ? { phase: "trip", ...toDestination.value } : null,
     });

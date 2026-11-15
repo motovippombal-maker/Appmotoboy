@@ -16,6 +16,7 @@ import {
 } from "@/lib/backend/ride-pricing";
 import { assertPaymentMethodAvailable } from "@/lib/backend/payment";
 import { dispatchPushQueue } from "@/lib/backend/push";
+import { readWithPreMarketplaceFallback } from "@/lib/backend/marketplace-schema";
 
 export async function POST(request: Request) {
   try {
@@ -24,7 +25,12 @@ export async function POST(request: Request) {
     const input = rideRequestSchema.parse(await request.json());
     assertPaymentMethodAvailable(input.paymentMethod);
     await expireRideSearches(supabase);
-    const { data: existingRide } = await supabase.from("rides").select("id,status").eq("passenger_id", user.id).not("status", "in", "(finalizada,cancelada)").limit(1).maybeSingle();
+    const existingRides = <Fields extends string>(fields: Fields) => supabase.from("rides").select(fields)
+      .eq("passenger_id", user.id).not("status", "in", "(finalizada,cancelada)").limit(1);
+    const { data: existingRide, error: existingRideError } = await readWithPreMarketplaceFallback("market_order_id",
+      () => existingRides("id,status").is("market_order_id", null).maybeSingle(),
+      () => existingRides("*").maybeSingle());
+    if (existingRideError) throw existingRideError;
     if (existingRide) throw new ApiError(409, "Você já possui uma corrida ativa. O estado atual foi preservado.", "ACTIVE_RIDE_EXISTS");
     let previousQuote;
     try {

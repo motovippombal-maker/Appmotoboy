@@ -109,6 +109,10 @@ Principais etapas:
 
 ## Tarifa atual e área de atendimento
 
+### Compras em lojas
+
+**Compras** tem catálogo, carrinho, checkout e acompanhamento próprios. Diferente de **Entrega**, o cliente faz o pedido dentro do MotoPombal, a loja prepara e só então solicita um entregador. Consulte [a implementação, as migrations pendentes e o roteiro de teste](docs/IMPLEMENTACAO_MARKETPLACE.md).
+
 ### Corridas e entregas
 
 Na tela inicial, escolha **Passageiro**, **Encomendas**, **Comida**, **Mercado** ou **Farmácia**. Entregas exigem local de retirada e de entrega, descrição do pedido, nome e telefone de quem recebe. As instruções de retirada e entrega são opcionais. Os pontos rápidos da cidade definem o local de retirada quando um serviço de entrega está selecionado; Casa, Trabalho e favoritos continuam definindo o destino.

@@ -48,16 +48,18 @@ export function RideServicePicker({
   value,
   onChange,
   disabled = false,
+  deliveriesOnly = false,
 }: {
   value: RideServiceType;
   onChange: (value: RideServiceType) => void;
   disabled?: boolean;
+  deliveriesOnly?: boolean;
 }) {
   return (
     <fieldset className="ride-service-picker" disabled={disabled}>
-      <legend>O que você precisa?</legend>
+      <legend>{deliveriesOnly ? "Tipo de entrega" : "O que você precisa?"}</legend>
       <div className="ride-service-options">
-        {RIDE_SERVICE_OPTIONS.map((service) => {
+        {RIDE_SERVICE_OPTIONS.filter((service) => !deliveriesOnly || service.id !== "passenger").map((service) => {
           const Icon = SERVICE_ICONS[service.id];
           const selected = value === service.id;
           return (

@@ -1,4 +1,5 @@
 import { configuredSecret, parsePublicSiteUrl, parseSupabaseUrl } from "../lib/config/public-site-url.mjs";
+import { marketplaceOperationEnvironment } from "../lib/config/marketplace-operation-mode.mjs";
 
 const required = [
   "NEXT_PUBLIC_SUPABASE_URL",
@@ -22,6 +23,17 @@ const incompleteVapid = configuredVapid.length > 0 && configuredVapid.length < v
 if (missingRequired.length > 0) {
   console.error("Variaveis obrigatorias ausentes para o deploy:");
   for (const name of missingRequired) console.error(`- ${name}`);
+  process.exit(1);
+}
+
+const marketplaceEnvironment = marketplaceOperationEnvironment();
+if (process.env.VERCEL_ENV === "preview" && marketplaceEnvironment?.operationMode !== "isolated_test") {
+  console.error("Preview do marketplace exige configuração de um Supabase separado de homologação e seu identificador de teste.");
+  process.exit(1);
+}
+
+if (process.env.MARKETPLACE_OPERATION_MODE?.trim() && !marketplaceEnvironment) {
+  console.error("Configuração de Compras incompatível com o ambiente ou com a URL e o identificador do Supabase configurado.");
   process.exit(1);
 }
 

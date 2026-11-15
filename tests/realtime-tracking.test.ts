@@ -67,10 +67,11 @@ before(async () => {
       raw_user_meta_data jsonb not null default '{}'::jsonb
     );
     create function auth.uid() returns uuid
-      language sql stable as $$ select null::uuid $$;
+      language sql stable as $$ select nullif(current_setting('test.gps_user', true), '')::uuid $$;
     create role anon nologin;
     create role authenticated nologin;
-    create role service_role nologin;
+    create role service_role nologin bypassrls;
+    grant usage on schema auth to anon, authenticated, service_role;
     create publication supabase_realtime;
   `);
   const directory = path.join(process.cwd(), "supabase", "migrations");
@@ -83,6 +84,55 @@ before(async () => {
 });
 
 after(async () => database.close());
+
+test("GPS revalida atribuição no banco e RLS oculta uma amostra antiga com vínculo inválido", async () => {
+  const driver = await seedDriver(true);
+  const actualPassenger = await seedPassenger();
+  const originalPassenger = await seedPassenger();
+  async function seedRide(passenger: string, assigned: boolean) {
+    const id = randomUUID();
+    await database.query(`
+      insert into public.rides(id,passenger_id,driver_id,status,origin_address,origin_lat,origin_lng,
+        destination_address,destination_lat,destination_lng,distance_meters,duration_seconds,fare_cents,payment_method)
+      values ($1,$2,$3,$4,'Origem sintética',-10.83,-38.53,'Destino sintético',-10.84,-38.54,1500,600,500,'cash')
+    `, [id, passenger, assigned ? driver.id : null, assigned ? "aceita" : "procurando_motorista"]);
+    return id;
+  }
+  const assignedRide = await seedRide(actualPassenger, true);
+  // A antiga corrida já voltou à fila, mas um POST autorizado antes da
+  // redistribuição ainda pode estar chegando ao RPC.
+  const oldRide = await seedRide(originalPassenger, false);
+  await database.exec("begin; set local role service_role");
+  try {
+    const applied = await database.query<{ applied: boolean }>(
+      "select public.upsert_driver_location_if_newer($1,$2,-10.83,-38.53,8,null,null,clock_timestamp()-interval '1 second') as applied",
+      [driver.id, assignedRide],
+    );
+    const late = await database.query<{ applied: boolean }>(
+      "select public.upsert_driver_location_if_newer($1,$2,-10.84,-38.54,8,null,null,clock_timestamp()) as applied",
+      [driver.id, oldRide],
+    );
+    assert.equal(applied.rows[0].applied, true);
+    assert.equal(late.rows[0].applied, false);
+  } finally { await database.exec("commit"); }
+  const row = await database.query<{ ride_id: string; latitude: number }>(
+    "select ride_id,latitude from public.driver_locations where driver_id=$1", [driver.id],
+  );
+  assert.deepEqual(row.rows, [{ ride_id: assignedRide, latitude: -10.83 }]);
+
+  async function visibleTo(passenger: string) {
+    await database.exec("begin");
+    try {
+      await database.query("select set_config('test.gps_user',$1,true)", [passenger]);
+      await database.exec("set local role authenticated");
+      return (await database.query("select driver_id from public.driver_locations where driver_id=$1", [driver.id])).rows.length;
+    } finally { await database.exec("rollback"); }
+  }
+  assert.equal(await visibleTo(actualPassenger), 1);
+  // Fixture simulates a bad association already persisted by the old writer.
+  await database.query("update public.driver_locations set ride_id=$1 where driver_id=$2", [oldRide, driver.id]);
+  assert.equal(await visibleTo(originalPassenger), 0);
+});
 
 test("1. passageiro recebe sinal para atualizar quando motorista entra online", async () => {
   const driver = await seedDriver(false);

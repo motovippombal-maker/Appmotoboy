@@ -1,4 +1,6 @@
 import { audit, consumeRateLimit, jsonError, requireUser, ApiError } from "@/lib/backend/api";
+import { readWithPreMarketplaceFallback } from "@/lib/backend/marketplace-schema";
+import { requireMarketplaceOperations } from "@/lib/backend/marketplace-operation-mode";
 
 const acceptedStatuses = ["aceita", "motorista_a_caminho", "motorista_chegou", "em_corrida"];
 
@@ -7,10 +9,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const { id } = await context.params;
     const { supabase, user } = await requireUser(request, ["driver"]);
     await consumeRateLimit(supabase, `ride-accept:${user.id}`, 12, 60);
-    const { data: currentRide } = await supabase.from("rides").select("driver_id,status").eq("id", id).maybeSingle();
+    const { data: currentRide, error: currentRideError } = await readWithPreMarketplaceFallback("market_order_id",
+      () => supabase.from("rides").select("driver_id,status,market_order_id").eq("id", id).maybeSingle(),
+      () => supabase.from("rides").select("*").eq("id", id).maybeSingle());
+    if (currentRideError) throw currentRideError;
     if (currentRide?.driver_id === user.id && acceptedStatuses.includes(currentRide.status)) {
       return Response.json({ accepted: true, rideId: id, duplicate: true });
     }
+    if (currentRide?.market_order_id) await requireMarketplaceOperations(supabase);
     const now = new Date().toISOString();
     const { data: offer } = await supabase.from("ride_requests").select("id").eq("ride_id", id).eq("driver_id", user.id).eq("status", "pending").gt("expires_at", now).maybeSingle();
     if (!offer) {
@@ -20,7 +26,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
       throw new ApiError(409, "Esta oferta expirou ou não foi destinada a você.", "OFFER_UNAVAILABLE");
     }
-    const { data, error } = await supabase.rpc("accept_ride", { p_ride_id: id, p_driver_id: user.id });
+    const { data, error } = await supabase.rpc(currentRide?.market_order_id ? "accept_market_delivery" : "accept_ride", { p_ride_id: id, p_driver_id: user.id });
     if (error) throw error;
     if (!data) {
       const { data: acceptedRide } = await supabase.from("rides").select("driver_id,status").eq("id", id).maybeSingle();

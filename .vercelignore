@@ -11,6 +11,7 @@ node_modules
 tsconfig.tsbuildinfo
 .agents
 .codex
+.codex-attachments
 .codex-verification
 supabase/.temp
 outputs

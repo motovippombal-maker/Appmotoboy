@@ -37,6 +37,9 @@ export type Profile = {
 };
 export type Ride = {
   id: string;
+  market_order_id?: string | null;
+  market_dispatch_source?: "preferred" | "network" | null;
+  market_delivery_exception_at?: string | null;
   service_type?: RideServiceType;
   service_details?: RideServiceDetails;
   passenger_id: string;
@@ -1272,10 +1275,14 @@ export function useMotoVip() {
       return result;
     },
     endRideEarly: async (rideId: string, reason: string) => {
-      const result = await api<{ ride: Ride }>(`/api/rides/${rideId}/early-end`, {
+      const result = await api<{ ride: Ride; exception?: boolean }>(`/api/rides/${rideId}/early-end`, {
         method: "POST", body: JSON.stringify({ reason }),
       });
       rideSnapshotRequest.current += 1;
+      if (result.exception) {
+        setActiveRide((current) => current?.id === rideId ? result.ride : current);
+        return result;
+      }
       setActiveRide((current) => current?.id === rideId ? null : current);
       setDriverTracking(null);
       setCompletedRide(result.ride);

@@ -5,6 +5,8 @@ import { parseCancellationPolicy } from "@/lib/backend/cancellation-policy";
 import { dispatchPushQueue } from "@/lib/backend/push";
 import { hasPreciseAccuracy } from "@/lib/location/driver-location-input";
 import { rideAssignmentFilters, sameRideAssignment } from "@/lib/backend/ride-assignment";
+import { applyMarketDriverAction } from "@/lib/backend/marketplace-dispatch";
+import { requireMarketplaceOperations } from "@/lib/backend/marketplace-operation-mode";
 
 const schema = z.object({ status: z.enum(["motorista_a_caminho", "motorista_chegou", "em_corrida", "finalizada", "cancelada"]), reason: z.string().max(300).optional(),
   reasonCode: z.enum(["mechanical", "personal", "cannot_reach", "unsafe", "passenger_requested", "address", "other"]).optional(),
@@ -23,6 +25,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     await consumeRateLimit(supabase, `ride-transition:${user.id}`, 30, 60);
     const { data: ride, error } = await supabase.from("rides").select("*").eq("id", id).single();
     if (error || !ride) throw new ApiError(404, "Corrida não encontrada.", "RIDE_NOT_FOUND");
+    if (ride.market_order_id && (profile.role !== "driver" || ride.driver_id !== user.id)) {
+      if (profile.role === "driver" && input.status === "cancelada" && !input.offlineEvent &&
+        input.reasonCode && input.reason?.trim() && input.reason !== "NO_SHOW") {
+        const { data: recorded, error: lookupError } = await supabase.from("ride_driver_cancellations")
+          .select("id").eq("ride_id",id).eq("driver_id",user.id).maybeSingle();
+        if (lookupError) throw lookupError;
+        // A lost response must not let a former driver touch the new assignment.
+        if (recorded) return Response.json({ rideId: id, status: "procurando_motorista", redispatched: true, duplicate: true });
+      }
+      throw new ApiError(403, "Use o acompanhamento do pedido para entregas de compras.", "MARKET_DELIVERY_DRIVER_ONLY");
+    }
+    if (ride.market_order_id && input.status !== "cancelada") await requireMarketplaceOperations(supabase);
+    if (ride.market_order_id && input.offlineEvent)
+      throw new ApiError(409, "Conecte-se para confirmar uma etapa da entrega de compras.", "MARKET_DELIVERY_ONLINE_REQUIRED");
     if (input.offlineEvent) {
       if (profile.role !== "driver" || ride.driver_id !== user.id || !["motorista_chegou", "em_corrida", "finalizada"].includes(input.status))
         throw new ApiError(403, "Evento offline inválido para esta corrida.", "INVALID_OFFLINE_EVENT");
@@ -36,6 +52,25 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     if (profile.blocked && (profile.role === "admin" || ride.status === "finalizada" || ride.status === "cancelada" || !["cancelada", "em_corrida", "finalizada", "motorista_a_caminho", "motorista_chegou"].includes(input.status)))
       throw new ApiError(403, "Conta bloqueada.", "ACCOUNT_BLOCKED");
+    if (ride.market_order_id) {
+      if (input.status === "cancelada") {
+        if (ride.status === "em_corrida")
+          throw new ApiError(409, "Após retirar o pedido, registre uma ocorrência para a central.", "MARKET_PICKUP_ALREADY_CONFIRMED");
+        if (input.reason === "NO_SHOW" || !input.reasonCode || !input.reason?.trim())
+          throw new ApiError(422, "Informe o motivo da desistência da entrega.", "CANCELLATION_REASON_REQUIRED");
+        const updated = await applyMarketDriverAction(supabase, id, user.id, "withdraw", input.reason, input.reasonCode);
+        return Response.json({ rideId: id, status: updated.status, redispatched: true });
+      }
+      if (input.status === "em_corrida" || input.status === "finalizada") {
+        if (input.status === "finalizada" && ride.market_delivery_exception_at)
+          throw new ApiError(409, "A central precisa resolver a ocorrência antes de concluir esta entrega.", "MARKET_DELIVERY_EXCEPTION");
+        const action = input.status === "em_corrida" ? "pickup" : "complete";
+        const updated = await applyMarketDriverAction(supabase, id, user.id, action);
+        // A repeated completion is allowed, but completed deliveries no longer
+        // authorize returning recipient details from the RPC's stored row.
+        return Response.json({ rideId: id, status: updated.status });
+      }
+    }
     if (input.status === "cancelada" && profile.role === "driver" && input.reason !== "NO_SHOW") {
         if (!input.reasonCode || !input.reason?.trim())
           throw new ApiError(422, "Informe o motivo do cancelamento.", "CANCELLATION_REASON_REQUIRED");
@@ -114,7 +149,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         if (!location || location.ride_id !== id || !hasPreciseAccuracy(location.accuracy_meters) ||
           Date.parse(location.updated_at) < Date.now() - 30_000 ||
           distanceKm({ lat: location.latitude, lng: location.longitude }, pickup) * 1000 > policy.arrival_radius_meters)
-          throw new ApiError(409, "Aguardando GPS preciso perto do embarque para confirmar chegada.", "OUTSIDE_PICKUP_GEOFENCE");
+          throw new ApiError(409, ride.market_order_id ? "Aguardando GPS preciso perto da loja para confirmar chegada." : "Aguardando GPS preciso perto do embarque para confirmar chegada.", "OUTSIDE_PICKUP_GEOFENCE");
         arrivalVerified = true;
       }
     }
