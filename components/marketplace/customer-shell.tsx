@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ShoppingBag, ReceiptText } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -30,6 +31,9 @@ export function useMarketCustomer() {
 }
 
 export function MarketCustomerShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname() ?? "";
+  const demo = pathname.startsWith("/compras/demonstracao/");
+  const storefront = demo || pathname.startsWith("/compras/lojas/");
   const [session, setSession] = useState<MarketAccountScope & { loading: boolean }>({ loading: true, id: null, generation: 0 });
   const scope = useRef<MarketAccountScope>({ id: null, generation: 0 });
   const [attempts] = useState(createMarketCheckoutAttempts);
@@ -41,6 +45,7 @@ export function MarketCustomerShell({ children }: { children: ReactNode }) {
   const isCurrentSession = useCallback(() => scope.current.generation === session.generation, [session.generation]);
   const pendingCheckoutKey = useCallback(() => isCurrentSession() && session.id ? attempts.read(session.id, tabStorage()) : null, [attempts, isCurrentSession, session.id]);
   useEffect(() => {
+    if (demo) return;
     try {
       const supabase = getSupabaseBrowserClient();
       const { data } = supabase.auth.onAuthStateChange((_event, next) => {
@@ -52,7 +57,7 @@ export function MarketCustomerShell({ children }: { children: ReactNode }) {
       const timer = window.setTimeout(() => setSession((current) => ({ ...current, loading: false })), 0);
       return () => window.clearTimeout(timer);
     }
-  }, []);
+  }, [demo]);
   return (
     <MarketContext.Provider value={{
       account, cart, setCart: (value) => { if (isCurrentSession()) setIdentityCart({ generation: session.generation, value }); },
@@ -71,14 +76,14 @@ export function MarketCustomerShell({ children }: { children: ReactNode }) {
         return true;
       },
     }}>
-      <div className="market-shell">
+      <div className={`market-shell${storefront ? " market-shell-storefront" : ""}`}>
         <header className="market-top">
-          <Link href="/" aria-label="Voltar ao MotoPombal"><ArrowLeft size={19} /></Link>
-          <Link href="/compras" className="market-wordmark">MotoPombal <span>Compras</span></Link>
-          <nav aria-label="Compras">
+          <Link href="/" aria-label="Voltar ao MotoPombal" prefetch={demo ? false : undefined}><ArrowLeft size={19} /></Link>
+          <Link href="/compras" className="market-wordmark" prefetch={demo ? false : undefined}>MotoPombal <span>Compras</span></Link>
+          {demo ? <span className="market-top-demo">Demonstração</span> : <nav aria-label="Compras">
             {cart && <Link href={`/compras/lojas/${cart.slug}#carrinho`} aria-label={`Carrinho com ${cart.entries.length} seleções`}><ShoppingBag size={19} /> <b>{cart.entries.length}</b></Link>}
             <Link href="/compras/pedidos" aria-label="Meus pedidos"><ReceiptText size={19} /></Link>
-          </nav>
+          </nav>}
         </header>
         <main className="market-main" key={session.generation}>{children}</main>
       </div>

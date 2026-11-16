@@ -12,7 +12,7 @@
     "build:vercel": "npm run check:vercel-env && node scripts/stamp-service-worker.mjs && next build",
     "test:rides": "node --test tests/ride-lifecycle.integration.mjs",
     "test:services": "tsx --test tests/ride-service.test.ts",
-    "test:marketplace": "tsx --test --test-concurrency=1 tests/marketplace-checkout.test.ts tests/marketplace-cart.test.ts tests/marketplace-management.test.ts tests/marketplace-dispatch-contract.test.mjs tests/marketplace-schema-compat.test.ts tests/push-delivery-policy.test.ts tests/marketplace-operation-mode.test.mjs",
+    "test:marketplace": "tsx --test --test-concurrency=1 tests/marketplace-checkout.test.ts tests/marketplace-cart.test.ts tests/marketplace-management.test.ts tests/marketplace-dispatch-contract.test.mjs tests/marketplace-schema-compat.test.ts tests/push-delivery-policy.test.ts tests/marketplace-operation-mode.test.mjs tests/marketplace-storefront.test.ts tests/marketplace-brasa-showcase.test.ts",
     "test:marketplace:db": "node --test tests/marketplace.integration.mjs",
     "test:marketplace:notifications": "node --test tests/marketplace-notifications.integration.mjs",
     "test:regressions": "tsx --test --test-concurrency=1 tests/backend-integrity.test.ts tests/frontend-races.test.ts tests/passenger-gps-race.test.ts tests/location-map-address.test.ts tests/pwa-infrastructure.test.mjs",
