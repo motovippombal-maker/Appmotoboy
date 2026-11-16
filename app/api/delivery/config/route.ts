@@ -8,6 +8,13 @@ export async function GET() {
       .select("enabled,cash_enabled,card_on_delivery_enabled")
       .eq("singleton", true)
       .single();
+    if (error?.code === "PGRST205") {
+      return Response.json({
+        enabled: false,
+        cashEnabled: false,
+        cardOnDeliveryEnabled: false,
+      });
+    }
     if (error) throw error;
     return Response.json({
       enabled: data.enabled,

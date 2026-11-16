@@ -42,6 +42,9 @@ export async function GET(request: Request) {
             .limit(20)
         : Promise.resolve({ data: [], error: null }),
     ]);
+    if (error?.code === "PGRST205" || matches.error?.code === "PGRST205") {
+      return Response.json({ restaurants: [], products: [], count: 0, page });
+    }
     if (error) throw error;
     if (matches.error) throw matches.error;
     const ids = (data || []).map((restaurant) => restaurant.id);
