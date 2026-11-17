@@ -84,3 +84,9 @@ A nova revisão acrescenta as migrations `145000` (valores declarados, divergên
 Leia [regras e resultados financeiros](REGRAS_FINANCEIRAS_MARKETPLACE.md) e [portão de publicação e ordem pendente](PUBLICACAO_MARKETPLACE.md). A revisão não publica, não habilita Pix/cartão e não ativa operação comercial real. `145000` exige o contrato novo de caixa; `146000` fecha Compras por padrão. Não aplique essas duas indiscriminadamente ao ambiente que serve clientes.
 
 **Revisão posterior, antes da aplicação em produção:** o responsável confirmou que só faltam `145000` e `146000`. A antiga `146000_marketplace_test_only.sql` foi substituída por `146000_marketplace_operation_mode.sql` (mantido o timestamp completo). A nova versão separa produção real de testes e inicia fechada nos dois modos. Use o [roteiro de corte](PUBLICACAO_MARKETPLACE.md): app compatível primeiro, janela somente de Compras, `145000` → `146000`, abertura deliberada por último. SQL remoto, publicação e habilitação ainda não foram executados.
+
+## Vitrine de lojas e Brasa da Vila — 16/11/2026
+
+A vitrine de `/compras/lojas/[slug]` usa o cardápio e a disponibilidade de cada loja real, com capa, logo, etapas, busca e categorias em vermelho e branco. As operações de endereço, cotação e checkout continuam usando o fluxo existente de Compras.
+
+A Brasa da Vila pode ser aberta pelo cartão de demonstração em Compras ou pela rota `/compras/demonstracao/brasa-da-vila`. O catálogo ilustrativo, suas opções e as imagens WebP são locais. O carrinho e a revisão da simulação existem apenas na memória da página: não se misturam ao carrinho comercial, não gravam nem enviam pedidos e não calculam frete ou cobram. O servidor D1/SQLite e o login do projeto independente do ZIP não fazem parte do app. Nenhum endereço, prazo ou preço fictício foi cadastrado como loja real; esta revisão não exige migration.

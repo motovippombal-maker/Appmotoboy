@@ -3,18 +3,23 @@
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Clock, MapPin, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
+import { ArrowLeft, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
 import { addMarketEntry, cartEntryId, optionsInRange, type MarketCartEntry } from "@/lib/marketplace/cart";
 import { MarketClientError, marketFetch, marketMessage, useMarketQuery } from "@/lib/marketplace/customer-client";
 import { marketQuoteInput, type MarketCatalog, type MarketProduct, type MarketQuote, type MarketQuoteInput } from "@/lib/marketplace/customer-contract";
 import { MarketAddress } from "./customer-address";
 import { MarketImage } from "./customer-browse";
 import { useMarketCustomer } from "./customer-shell";
+import { MarketStorefront, marketMoney } from "./storefront";
 
-export const marketMoney = (cents: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
-const weekdays = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+export { marketMoney } from "./storefront";
 
-function ProductSelection({ product, onAdd, onClose }: { product: MarketProduct; onAdd: (entry: MarketCartEntry) => void; onClose: () => void }) {
+export function ProductSelection({ product, onAdd, onClose, canAdd = true }: {
+  product: MarketProduct;
+  onAdd: (entry: MarketCartEntry) => void;
+  onClose: () => void;
+  canAdd?: boolean;
+}) {
   const [quantity, setQuantity] = useState(1);
   const [selected, setSelected] = useState<string[]>([]);
   const chosen = product.groups.flatMap(({ options }) => options).filter(({ id }) => selected.includes(id));
@@ -26,17 +31,19 @@ function ProductSelection({ product, onAdd, onClose }: { product: MarketProduct;
     if (node && !node.open) node.showModal();
     return () => node?.close();
   }, []);
-  return <dialog ref={dialog} className="market-dialog" aria-labelledby={id} onCancel={onClose}>
+  return <dialog ref={dialog} className="market-dialog market-store-dialog" aria-labelledby={id} onCancel={onClose}>
     <button type="button" className="market-secondary" onClick={onClose}><ArrowLeft size={16} /> Voltar à loja</button>
     <MarketImage src={product.image_url} className="market-product-hero" />
     <h2 id={id}>{product.name}</h2>
     {product.description && <p>{product.description}</p>}
     <strong>{marketMoney(product.price_cents)}</strong>
-    {product.groups.map((group) => {
+    {product.groups.map((group, index) => {
       const selectedInGroup = group.options.filter((option) => selected.includes(option.id));
-      return <fieldset className="market-option-group" key={group.id}>
+      const limit = `${id}-limit-${index}`;
+      return <fieldset className="market-option-group" key={group.id} aria-describedby={limit}>
         <legend>{group.name}</legend>
-        <small>{group.min_select > 0 ? `Escolha de ${group.min_select} a ${group.max_select}` : `Opcional · até ${group.max_select}`}</small>
+        <small id={limit}>{group.min_select === 1 && group.max_select === 1 ? "Obrigatório · escolha 1" :
+          group.min_select > 0 ? `Escolha de ${group.min_select} a ${group.max_select}` : `Opcional · até ${group.max_select}`}</small>
         {group.options.map((option) => {
           const checked = selected.includes(option.id);
           return <label className="market-option" key={option.id}><input type="checkbox" checked={checked} disabled={!checked && group.max_select !== 1 && selectedInGroup.length >= group.max_select} onChange={() => {
@@ -51,10 +58,34 @@ function ProductSelection({ product, onAdd, onClose }: { product: MarketProduct;
       <output aria-label="Quantidade">{quantity}</output>
       <button type="button" className="market-secondary" aria-label="Aumentar quantidade" disabled={quantity >= 99} onClick={() => setQuantity((value) => value + 1)}><Plus size={17} /></button>
     </div>
-    <button type="button" className="market-primary market-wide" disabled={!product.available || !optionsInRange(product.groups, selected)} onClick={() => onAdd({
+    <button type="button" className="market-primary market-wide" disabled={!canAdd || !product.available || !optionsInRange(product.groups, selected)} onClick={() => onAdd({
       productId: product.id, quantity, optionIds: selected, title: product.name,
       optionsLabel: chosen.map((option) => option.name).join(", "), estimatedUnitCents: unit,
-    })}>Adicionar · {marketMoney(unit * quantity)}</button>
+    })}>{!canAdd || !product.available ? "Indisponível para pedido" : `Adicionar · ${marketMoney(unit * quantity)}`}</button>
+  </dialog>;
+}
+
+function ReplaceStoreDialog({ onCancel, onConfirm, canConfirm }: {
+  onCancel: () => void;
+  onConfirm: () => void;
+  canConfirm: boolean;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const initialFocus = useRef<HTMLButtonElement>(null);
+  const heading = useId();
+  useEffect(() => {
+    const node = dialog.current;
+    if (node && !node.open) node.showModal();
+    initialFocus.current?.focus();
+    return () => node?.close();
+  }, []);
+  return <dialog ref={dialog} className="market-dialog market-store-dialog" aria-labelledby={heading} onCancel={onCancel}>
+    <h2 id={heading}>Trocar de loja?</h2>
+    <p>Ao confirmar, os itens da outra loja serão removidos do seu carrinho.</p>
+    <div className="market-row">
+      <button ref={initialFocus} className="market-secondary" type="button" onClick={onCancel}>Manter carrinho</button>
+      <button className="market-primary" type="button" onClick={onConfirm} disabled={!canConfirm}>Trocar e adicionar</button>
+    </div>
   </dialog>;
 }
 
@@ -69,6 +100,7 @@ function CashCheckout({ enabled }: { enabled: boolean }) {
   const [message, setMessage] = useState("");
   const [uncertain, setUncertain] = useState(false);
   const inFlight = useRef(false);
+  const quoteHeading = useRef<HTMLHeadingElement>(null);
   const active = useRef(false);
   const checkedKey = useRef<string | null>(null);
   const userId = account.id ?? undefined;
@@ -86,6 +118,9 @@ function CashCheckout({ enabled }: { enabled: boolean }) {
   const input = current?.success ? current.data : null;
   const serializedInput = input ? JSON.stringify(input) : "";
   const quote = state?.input === serializedInput ? state.quote : null;
+  useEffect(() => {
+    if (enabled && quote) quoteHeading.current?.focus();
+  }, [enabled, quote]);
   function completed(id: string, key: string, submittedCart?: NonNullable<typeof cart>) {
     if (!active.current || !isCurrentSession() || !resolveCheckout(key, submittedCart)) return;
     setUncertain(false);
@@ -170,7 +205,7 @@ function CashCheckout({ enabled }: { enabled: boolean }) {
         {!address && <p>Defina o endereço de entrega acima.</p>}
       </form>
       {quote && input && <div className="market-stack">
-        <h3>Confira o pedido</h3>
+        <h3 ref={quoteHeading} tabIndex={-1}>Confira o pedido</h3>
         <ul className="market-list">{quote.items.map((line, index) => <li key={`${line.productId}:${index}`}><span>{line.quantity} × {line.productName}{!!line.options.length && <small>{line.options.map(({ name }) => name).join(", ")}</small>}</span><b>{marketMoney(line.lineTotalCents)}</b></li>)}</ul>
         <dl className="market-totals">
           <div><dt>Produtos e complementos</dt><dd>{marketMoney(quote.subtotalCents)}</dd></div>
@@ -192,47 +227,36 @@ function CashCheckout({ enabled }: { enabled: boolean }) {
 export function MarketStorePage({ slug }: { slug: string }) {
   const { cart, setCart, address } = useMarketCustomer();
   const { data, error, loading, refresh } = useMarketQuery<MarketCatalog>(`/api/marketplace/stores/${encodeURIComponent(slug)}`, undefined, 60_000);
-  const [product, setProduct] = useState<MarketProduct | null>(null);
-  const [category, setCategory] = useState("");
+  const [productId, setProductId] = useState<string | null>(null);
   const [replacement, setReplacement] = useState<MarketCartEntry | null>(null);
   const [message, setMessage] = useState("");
   if (loading) return <p role="status">Carregando loja…</p>;
   if (!data) return <section className="market-panel"><Link href="/compras">Voltar às lojas</Link><h1>Loja indisponível</h1><p className="market-error" role="alert">{error}</p><button type="button" className="market-secondary" onClick={refresh}>Tentar novamente</button></section>;
-  const { store, categories, products, checkoutAvailable } = data;
+  const { store, products, checkoutAvailable } = data;
   const servesAddress = !address || !store.service_area_id || address.areaIds.includes(store.service_area_id);
+  const canAdd = checkoutAvailable && store.open && servesAddress;
+  const product = products.find((item) => item.id === productId);
   const items = cart?.storeId === store.id ? cart.entries : [];
-  const visible = category ? products.filter((item) => item.category_id === category) : products;
   function add(entry: MarketCartEntry, replace = false) {
+    if (!canAdd || !products.some((item) => item.id === entry.productId && item.available)) return;
     const result = addMarketEntry(cart, store, entry, replace);
-    setProduct(null);
+    setProductId(null);
     if (result.state === "replace") { setReplacement(entry); return; }
     setReplacement(null);
     if (result.state === "limit") { setMessage("O carrinho atingiu o limite de itens ou quantidade."); return; }
     setCart(result.cart); setMessage("Produto adicionado ao carrinho.");
   }
   return <>
-    <Link className="market-back" href="/compras"><ArrowLeft size={17} /> Todas as lojas</Link>
-    <section className="market-panel market-store-head">
-      <MarketImage src={store.cover_url || store.image_url} className="market-cover" />
-      <span className="market-eyebrow">{store.category}</span><h1>{store.name}</h1>
-      <b>{store.open ? "Aberta para pedidos" : "Fechada no momento"}</b>
-      {store.description && <p>{store.description}</p>}
-      <p className="market-row"><MapPin size={16} /> {store.address}</p>
-      {store.prep_minutes !== null && <p className="market-row"><Clock size={16} /> Preparo informado: {store.prep_minutes} min</p>}
-      {!!Object.keys(store.hours).length && <details><summary>Horários de atendimento</summary><ul>{weekdays.map((day, index) => <li key={day}>{day}: {store.hours[String(index + 1)]?.map(({ open, close }) => `${open}–${close}`).join(", ") || "Fechada"}</li>)}</ul></details>}
-    </section>
-    <MarketAddress />
-    {!checkoutAvailable && <p className="market-status" role="status">Catálogo para consulta. Novos pedidos estão indisponíveis.</p>}
-    {error && <p className="market-error" role="alert">{error} <button type="button" className="market-secondary" onClick={refresh}>Atualizar</button></p>}
-    {!servesAddress && <p className="market-error" role="alert">A loja não atende o endereço escolhido.</p>}
-    <section aria-label="Catálogo">
-      <h2>Catálogo</h2>
-      {!!categories.length && <nav className="market-filters" aria-label="Categorias de produto">{[{ id: "", name: "Todos" }, ...categories].map((item) => <button type="button" key={item.id} aria-pressed={category === item.id} onClick={() => setCategory(item.id)}>{item.name}</button>)}</nav>}
-      {!visible.length && <p className="market-panel">Nenhum produto disponível nesta categoria.</p>}
-      <div className="market-card-grid">{visible.map((item) => <button key={item.id} type="button" className="market-product-card" onClick={() => setProduct(item)} disabled={!checkoutAvailable || !item.available || !store.open || !servesAddress}><MarketImage src={item.image_url} className="market-product-photo" /><span><b>{item.name}</b>{item.description && <small>{item.description}</small>}<strong>{marketMoney(item.price_cents)}</strong>{!item.available && <small>Indisponível</small>}</span></button>)}</div>
-    </section>
-    {product && <ProductSelection key={product.id} product={product} onAdd={add} onClose={() => setProduct(null)} />}
-    {replacement && <section className="market-panel market-confirm" role="alert"><h2>Trocar de loja?</h2><p>Ao confirmar, os itens da outra loja serão removidos do seu carrinho.</p><div className="market-row"><button className="market-secondary" type="button" onClick={() => setReplacement(null)}>Manter carrinho</button><button className="market-primary" type="button" onClick={() => add(replacement, true)}>Trocar e adicionar</button></div></section>}
+    <MarketStorefront catalog={data} onSelect={(item) => setProductId(item.id)}
+      cartItems={items.reduce((sum, item) => sum + item.quantity, 0)} delivery={<>
+        <MarketAddress />
+        {!checkoutAvailable && <p className="market-status" role="status">Catálogo para consulta. Novos pedidos estão indisponíveis.</p>}
+        {error && <p className="market-error" role="alert">{error} <button type="button" className="market-secondary" onClick={refresh}>Atualizar</button></p>}
+        {!servesAddress && <p className="market-error" role="alert">A loja não atende o endereço escolhido.</p>}
+      </>} />
+    {product && <ProductSelection key={product.id} product={product} onAdd={add} onClose={() => setProductId(null)} canAdd={canAdd} />}
+    {replacement && <ReplaceStoreDialog onCancel={() => setReplacement(null)} onConfirm={() => add(replacement, true)}
+      canConfirm={canAdd && products.some((item) => item.id === replacement.productId && item.available)} />}
     {message && <p className="market-status" role="status">{message}</p>}
     <section id="carrinho" className="market-panel" aria-label="Carrinho">
       <h2 className="market-row"><ShoppingBag size={21} /> Carrinho</h2>
@@ -245,6 +269,6 @@ export function MarketStorePage({ slug }: { slug: string }) {
         <p className="market-muted">Valores do catálogo. O servidor confirma produtos, complementos e frete no checkout.</p>
       </>}
     </section>
-    {!!items.length && <CashCheckout enabled={checkoutAvailable} />}
+    {!!items.length && <CashCheckout enabled={canAdd} />}
   </>;
 }

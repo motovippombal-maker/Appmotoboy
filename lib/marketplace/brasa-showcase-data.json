@@ -1,0 +1,952 @@
+{
+  "categories": [
+    {
+      "id": "hamburgueres",
+      "name": "Hambúrgueres"
+    },
+    {
+      "id": "combos",
+      "name": "Combos"
+    },
+    {
+      "id": "porcoes",
+      "name": "Porções"
+    },
+    {
+      "id": "bebidas",
+      "name": "Bebidas"
+    },
+    {
+      "id": "sobremesas",
+      "name": "Sobremesas"
+    },
+    {
+      "id": "cachorros-quentes",
+      "name": "Cachorros-quentes"
+    },
+    {
+      "id": "sanduiches",
+      "name": "Sanduíches"
+    },
+    {
+      "id": "salgados",
+      "name": "Salgados"
+    }
+  ],
+  "products": [
+    {
+      "id": "burger-classico",
+      "name": "Burger Clássico",
+      "description": "Pão de brioche, hambúrguer bovino de 120 g, queijo, alface, tomate e molho da casa.",
+      "category": "hamburgueres",
+      "price": 2290,
+      "available": true,
+      "image": "burger-classico.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "burger-duplo",
+      "name": "Burger Duplo",
+      "description": "Dois hambúrgueres bovinos de 120 g, queijo em dobro, picles e molho especial no brioche.",
+      "category": "hamburgueres",
+      "price": 3190,
+      "available": true,
+      "image": "burger-duplo.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "burger-bacon",
+      "name": "Burger Bacon",
+      "description": "Hambúrguer bovino de 120 g, cheddar, bacon crocante, cebola roxa e molho da casa.",
+      "category": "hamburgueres",
+      "price": 2890,
+      "available": true,
+      "image": "burger-bacon.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "burger-frango",
+      "name": "Burger Frango",
+      "description": "Filé de frango empanado, queijo, alface, tomate e maionese de ervas no brioche.",
+      "category": "hamburgueres",
+      "price": 2490,
+      "available": true,
+      "image": "burger-frango.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "burger-vegetariano",
+      "name": "Burger Vegetariano",
+      "description": "Hambúrguer de grão-de-bico, queijo, rúcula, tomate e maionese de ervas no brioche.",
+      "category": "hamburgueres",
+      "price": 2690,
+      "available": true,
+      "image": "burger-vegetariano.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "burger-especial",
+      "name": "Burger Especial da Casa",
+      "description": "Hambúrguer bovino de 160 g, cheddar, bacon, cebola caramelizada e molho especial.",
+      "category": "hamburgueres",
+      "price": 3490,
+      "available": true,
+      "image": "burger-especial.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "combo-classico",
+      "name": "Combo Clássico",
+      "description": "Burger Clássico, batata frita pequena e uma bebida à sua escolha incluída.",
+      "category": "combos",
+      "price": 3490,
+      "available": true,
+      "image": "combo-classico.webp",
+      "options": [
+        {
+          "id": "bebida",
+          "name": "Escolha sua bebida incluída",
+          "min": 1,
+          "max": 1,
+          "choices": [
+            {
+              "id": "cola",
+              "name": "Cola 350 ml",
+              "price": 0
+            },
+            {
+              "id": "guarana",
+              "name": "Guaraná 350 ml",
+              "price": 0
+            },
+            {
+              "id": "laranja",
+              "name": "Laranja 350 ml",
+              "price": 0
+            },
+            {
+              "id": "agua",
+              "name": "Água mineral 500 ml",
+              "price": 0
+            }
+          ]
+        },
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "combo-duplo",
+      "name": "Combo Duplo",
+      "description": "Burger Duplo, batata frita pequena e uma bebida à sua escolha incluída.",
+      "category": "combos",
+      "price": 4390,
+      "available": true,
+      "image": "combo-duplo.webp",
+      "options": [
+        {
+          "id": "bebida",
+          "name": "Escolha sua bebida incluída",
+          "min": 1,
+          "max": 1,
+          "choices": [
+            {
+              "id": "cola",
+              "name": "Cola 350 ml",
+              "price": 0
+            },
+            {
+              "id": "guarana",
+              "name": "Guaraná 350 ml",
+              "price": 0
+            },
+            {
+              "id": "laranja",
+              "name": "Laranja 350 ml",
+              "price": 0
+            },
+            {
+              "id": "agua",
+              "name": "Água mineral 500 ml",
+              "price": 0
+            }
+          ]
+        },
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "combo-kids",
+      "name": "Combo Kids",
+      "description": "Miniburger com queijo, batata frita pequena e uma bebida à sua escolha incluída.",
+      "category": "combos",
+      "price": 2690,
+      "available": true,
+      "image": "combo-kids.webp",
+      "options": [
+        {
+          "id": "bebida",
+          "name": "Escolha sua bebida incluída",
+          "min": 1,
+          "max": 1,
+          "choices": [
+            {
+              "id": "cola",
+              "name": "Cola 350 ml",
+              "price": 0
+            },
+            {
+              "id": "guarana",
+              "name": "Guaraná 350 ml",
+              "price": 0
+            },
+            {
+              "id": "laranja",
+              "name": "Laranja 350 ml",
+              "price": 0
+            },
+            {
+              "id": "agua",
+              "name": "Água mineral 500 ml",
+              "price": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "combo-dois",
+      "name": "Combo para Dois",
+      "description": "Dois Burgers Clássicos, duas batatas pequenas e duas bebidas incluídas.",
+      "category": "combos",
+      "price": 6590,
+      "available": true,
+      "image": "combo-dois.webp",
+      "options": [
+        {
+          "id": "bebida",
+          "name": "Escolha as duas bebidas incluídas",
+          "min": 1,
+          "max": 1,
+          "choices": [
+            {
+              "id": "duas-colas",
+              "name": "2 Colas 350 ml",
+              "price": 0
+            },
+            {
+              "id": "cola-guarana",
+              "name": "Cola + Guaraná 350 ml",
+              "price": 0
+            },
+            {
+              "id": "guarana-laranja",
+              "name": "Guaraná + Laranja 350 ml",
+              "price": 0
+            },
+            {
+              "id": "duas-aguas",
+              "name": "2 Águas minerais 500 ml",
+              "price": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "batata-pequena",
+      "name": "Batata Frita Pequena",
+      "description": "Batatas douradas e crocantes, com uma pitada de sal. Porção demonstrativa de 150 g.",
+      "category": "porcoes",
+      "price": 1290,
+      "available": true,
+      "image": "batata-pequena.webp",
+      "options": []
+    },
+    {
+      "id": "batata-grande",
+      "name": "Batata Frita Grande",
+      "description": "Batatas douradas para compartilhar. Porção demonstrativa de 300 g.",
+      "category": "porcoes",
+      "price": 2090,
+      "available": true,
+      "image": "batata-grande.webp",
+      "options": []
+    },
+    {
+      "id": "batata-cheddar-bacon",
+      "name": "Batata com Cheddar e Bacon",
+      "description": "Batata frita com cobertura cremosa de cheddar e pedacinhos de bacon crocante. 350 g.",
+      "category": "porcoes",
+      "price": 2690,
+      "available": true,
+      "image": "batata-cheddar-bacon.webp",
+      "options": []
+    },
+    {
+      "id": "aneis-cebola",
+      "name": "Anéis de Cebola",
+      "description": "Anéis de cebola empanados e crocantes, acompanhados de molho da casa. 200 g.",
+      "category": "porcoes",
+      "price": 1890,
+      "available": true,
+      "image": "aneis-cebola.webp",
+      "options": []
+    },
+    {
+      "id": "cola-350",
+      "name": "Refrigerante Cola 350 ml",
+      "description": "Refrigerante sabor cola, gelado. Lata de 350 ml.",
+      "category": "bebidas",
+      "price": 650,
+      "available": true,
+      "image": "cola-350.webp",
+      "options": []
+    },
+    {
+      "id": "guarana-350",
+      "name": "Refrigerante Guaraná 350 ml",
+      "description": "Refrigerante sabor guaraná, gelado. Lata de 350 ml.",
+      "category": "bebidas",
+      "price": 650,
+      "available": true,
+      "image": "guarana-350.webp",
+      "options": []
+    },
+    {
+      "id": "laranja-350",
+      "name": "Refrigerante Laranja 350 ml",
+      "description": "Refrigerante sabor laranja, gelado. Lata de 350 ml.",
+      "category": "bebidas",
+      "price": 650,
+      "available": true,
+      "image": "laranja-350.webp",
+      "options": []
+    },
+    {
+      "id": "agua-mineral",
+      "name": "Água Mineral",
+      "description": "Água mineral sem gás. Garrafa de 500 ml.",
+      "category": "bebidas",
+      "price": 450,
+      "available": true,
+      "image": "agua-mineral.webp",
+      "options": []
+    },
+    {
+      "id": "suco-laranja",
+      "name": "Suco de Laranja",
+      "description": "Suco de laranja servido gelado. Copo de 300 ml.",
+      "category": "bebidas",
+      "price": 900,
+      "available": true,
+      "image": "suco-laranja.webp",
+      "options": []
+    },
+    {
+      "id": "suco-uva",
+      "name": "Suco de Uva",
+      "description": "Suco de uva servido gelado. Copo de 300 ml.",
+      "category": "bebidas",
+      "price": 900,
+      "available": true,
+      "image": "suco-uva.webp",
+      "options": []
+    },
+    {
+      "id": "brownie",
+      "name": "Brownie",
+      "description": "Brownie de chocolate com casquinha delicada e interior macio. Unidade de 90 g.",
+      "category": "sobremesas",
+      "price": 1290,
+      "available": true,
+      "image": "brownie.webp",
+      "options": []
+    },
+    {
+      "id": "pudim",
+      "name": "Pudim",
+      "description": "Pudim de leite com calda de caramelo. Porção individual de 120 g.",
+      "category": "sobremesas",
+      "price": 1190,
+      "available": true,
+      "image": "pudim.webp",
+      "options": []
+    },
+    {
+      "id": "milkshake-chocolate",
+      "name": "Milk-shake de Chocolate",
+      "description": "Sorvete de chocolate batido com leite e calda de chocolate. A partir de 300 ml.",
+      "category": "sobremesas",
+      "price": 1690,
+      "available": true,
+      "image": "milkshake-chocolate.webp",
+      "options": [
+        {
+          "id": "tamanho",
+          "name": "Tamanho",
+          "min": 1,
+          "max": 1,
+          "choices": [
+            {
+              "id": "300ml",
+              "name": "300 ml",
+              "price": 0
+            },
+            {
+              "id": "500ml",
+              "name": "500 ml",
+              "price": 600
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "milkshake-morango",
+      "name": "Milk-shake de Morango",
+      "description": "Sorvete de morango batido com leite e calda de morango. A partir de 300 ml.",
+      "category": "sobremesas",
+      "price": 1690,
+      "available": true,
+      "image": "milkshake-morango.webp",
+      "options": [
+        {
+          "id": "tamanho",
+          "name": "Tamanho",
+          "min": 1,
+          "max": 1,
+          "choices": [
+            {
+              "id": "300ml",
+              "name": "300 ml",
+              "price": 0
+            },
+            {
+              "id": "500ml",
+              "name": "500 ml",
+              "price": 600
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smash-salada",
+      "name": "Smash Salada",
+      "description": "Dois smash burgers de 70 g, queijo, alface, tomate e maionese da casa no pão macio.",
+      "category": "hamburgueres",
+      "price": 2790,
+      "available": true,
+      "image": "smash-salada.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "triplo-cheddar",
+      "name": "Triplo Cheddar",
+      "description": "Três hambúrgueres de 80 g, cheddar cremoso, cebola caramelizada e molho especial.",
+      "category": "hamburgueres",
+      "price": 3990,
+      "available": true,
+      "image": "triplo-cheddar.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "frango-grelhado",
+      "name": "Burger Frango Grelhado",
+      "description": "Peito de frango grelhado, queijo, folhas frescas e maionese de ervas no brioche.",
+      "category": "hamburgueres",
+      "price": 2690,
+      "available": true,
+      "image": "frango-grelhado.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "brasa-picante",
+      "name": "Brasa Picante",
+      "description": "Hambúrguer de 160 g, queijo, jalapeño, cebola roxa e molho de pimenta da casa. Levemente picante.",
+      "category": "hamburgueres",
+      "price": 3290,
+      "available": true,
+      "image": "brasa-picante.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hot-dog-classico",
+      "name": "Hot Dog Clássico",
+      "description": "Pão macio, salsicha, molho de tomate, milho e batata palha. Uma unidade generosa.",
+      "category": "cachorros-quentes",
+      "price": 1490,
+      "available": true,
+      "image": "hot-dog-classico.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dog-bacon",
+      "name": "Dog Bacon",
+      "description": "Hot dog com salsicha, cheddar, bacon crocante, molho especial e batata palha.",
+      "category": "cachorros-quentes",
+      "price": 1990,
+      "available": true,
+      "image": "dog-bacon.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dog-duplo",
+      "name": "Dog Duplo",
+      "description": "Duas salsichas, queijo, molho de tomate, milho e batata palha no pão de hot dog.",
+      "category": "cachorros-quentes",
+      "price": 2190,
+      "available": true,
+      "image": "dog-duplo.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dog-prensado",
+      "name": "Dog Prensado",
+      "description": "Salsicha, queijo, tomate e molho da casa em pão dourado na chapa.",
+      "category": "cachorros-quentes",
+      "price": 1790,
+      "available": true,
+      "image": "dog-prensado.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "misto-quente",
+      "name": "Misto Quente",
+      "description": "Pão de forma dourado na chapa, presunto e queijo derretido.",
+      "category": "sanduiches",
+      "price": 1290,
+      "available": true,
+      "image": "misto-quente.webp",
+      "options": []
+    },
+    {
+      "id": "bauru",
+      "name": "Bauru da Vila",
+      "description": "Pão francês crocante com presunto, queijo, tomate e orégano, finalizado na chapa.",
+      "category": "sanduiches",
+      "price": 1790,
+      "available": true,
+      "image": "bauru.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "frango-natural",
+      "name": "Sanduíche Natural de Frango",
+      "description": "Pão integral com frango desfiado, cenoura, alface e creme leve de ervas.",
+      "category": "sanduiches",
+      "price": 1690,
+      "available": true,
+      "image": "frango-natural.webp",
+      "options": []
+    },
+    {
+      "id": "pernil",
+      "name": "Sanduíche de Pernil",
+      "description": "Pão francês, pernil desfiado, cebola dourada e vinagrete fresco da casa.",
+      "category": "sanduiches",
+      "price": 2490,
+      "available": true,
+      "image": "pernil.webp",
+      "options": [
+        {
+          "id": "adicionais",
+          "name": "Adicionais",
+          "min": 0,
+          "max": 2,
+          "choices": [
+            {
+              "id": "queijo",
+              "name": "Queijo extra",
+              "price": 300
+            },
+            {
+              "id": "bacon",
+              "name": "Bacon crocante",
+              "price": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "coxinha-frango",
+      "name": "Coxinha de Frango",
+      "description": "Massa dourada e crocante com recheio de frango desfiado temperado. Unidade de 120 g.",
+      "category": "salgados",
+      "price": 790,
+      "available": true,
+      "image": "coxinha-frango.webp",
+      "options": []
+    },
+    {
+      "id": "coxinha-catupiry",
+      "name": "Coxinha Cremosa",
+      "description": "Coxinha de frango com requeijão cremoso e casquinha crocante. Unidade de 130 g.",
+      "category": "salgados",
+      "price": 990,
+      "available": true,
+      "image": "coxinha-catupiry.webp",
+      "options": []
+    },
+    {
+      "id": "pastel-carne",
+      "name": "Pastel de Carne",
+      "description": "Massa fina e crocante com carne moída temperada, cebola e cheiro-verde. Unidade de 150 g.",
+      "category": "salgados",
+      "price": 1190,
+      "available": true,
+      "image": "pastel-carne.webp",
+      "options": []
+    },
+    {
+      "id": "pastel-queijo",
+      "name": "Pastel de Queijo",
+      "description": "Pastel dourado com recheio de queijo derretido e um toque de orégano. Unidade de 150 g.",
+      "category": "salgados",
+      "price": 1090,
+      "available": true,
+      "image": "pastel-queijo.webp",
+      "options": []
+    },
+    {
+      "id": "kibe",
+      "name": "Kibe da Vila",
+      "description": "Kibe frito de carne e trigo, temperado com hortelã e acompanhado de limão. Unidade de 100 g.",
+      "category": "salgados",
+      "price": 790,
+      "available": true,
+      "image": "kibe.webp",
+      "options": []
+    },
+    {
+      "id": "empada-frango",
+      "name": "Empada de Frango",
+      "description": "Massa amanteigada que desmancha, com frango desfiado e recheio cremoso. Unidade de 110 g.",
+      "category": "salgados",
+      "price": 890,
+      "available": true,
+      "image": "empada-frango.webp",
+      "options": []
+    }
+  ]
+}
