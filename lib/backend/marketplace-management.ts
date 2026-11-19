@@ -6,10 +6,11 @@ import { InvalidBrazilianPhoneError } from "@/lib/auth/phone-identity";
 import { dispatchMarketOrder } from "@/lib/backend/marketplace-dispatch";
 import { managementId, type AdminManagementAction, type MerchantManagementAction } from "@/lib/marketplace/management";
 import type { ManagementData, ManageOrder, ManageStore } from "@/lib/marketplace/management-view";
-import { managementError, requireManageStore, requireManagementOrder } from "@/lib/backend/marketplace-management-access";
+import { managementError, requireManageStore, requireManagementOrder, requirePreferredDriverStore } from "@/lib/backend/marketplace-management-access";
 import { marketplaceOperationsEnabled, requireMarketplaceOperations } from "@/lib/backend/marketplace-operation-mode";
 import { MARKET_CASH_FIELDS } from "@/lib/marketplace/cash-reconciliation";
 import { isMarketCashActionUnavailable, LEGACY_MARKET_CASH_FIELDS, legacyMarketCash, readWithMarketCashFallback } from "@/lib/backend/marketplace-cash-schema";
+import { isStoreReadinessRpcMissing, parseStoreReadiness, type StoreReadiness } from "@/lib/marketplace/store-onboarding-review";
 
 type Auth = Awaited<ReturnType<typeof requireUser>>;
 type ManageAction = Exclude<AdminManagementAction, { action: "findMember" }> | MerchantManagementAction;
@@ -30,6 +31,15 @@ export async function findManagementMember(auth: Auth, phone: string) {
     if (problem instanceof InvalidBrazilianPhoneError) throw new ApiError(400, problem.message, "MARKET_INVALID_PHONE");
     throw problem;
   }
+}
+
+export async function loadStoreReadiness(auth: Auth, storeId: string): Promise<StoreReadiness | null> {
+  await requireManageStore(auth, storeId);
+  const result = await auth.supabase.rpc("market_store_readiness", { p_actor_id: auth.user.id, p_store_id: storeId });
+  // Older deployments keep their existing store panel before this incremental migration.
+  if (isStoreReadinessRpcMissing(result.error)) return null;
+  managementError(result.error);
+  return parseStoreReadiness(result.data);
 }
 
 async function loadManagementOrders(auth: Auth, storeId: string, central: boolean): Promise<{ orders: ManageOrder[]; cashSchemaReady: boolean }> {
@@ -78,9 +88,11 @@ export async function managementData(auth: Auth, requestedStoreId: string | null
   const storeId = selected ?? empty.stores[0]?.id;
   if (!storeId) return empty;
   const role = await requireManageStore(auth, storeId);
-  const editablePreference = role !== "manager";
-  const [storeResult, openResult, categories, products, groups, options, orderRead, drivers, members] = await Promise.all([
-    supabase.from("market_stores").select(STORE_FIELDS).eq("id", storeId).maybeSingle(),
+  const storeResult = await supabase.from("market_stores").select(STORE_FIELDS).eq("id", storeId).maybeSingle();
+  managementError(storeResult.error);
+  if (!storeResult.data) throw new ApiError(404, "Loja não encontrada.", "MARKET_STORE_NOT_FOUND");
+  const editablePreference = role === "admin" || (role === "owner" && storeResult.data.status === "approved" && storeResult.data.active === true);
+  const [openResult, categories, products, groups, options, orderRead, drivers, members, storeReadiness] = await Promise.all([
     supabase.rpc("market_store_open", { p_store_id: storeId }),
     central ? null : supabase.from("market_categories").select("id,name,active,sort_order").eq("store_id", storeId).order("sort_order").order("name"),
     central ? null : supabase.from("market_products").select("id,name,active,sort_order,category_id,description,image_url,price_cents,stock_quantity").eq("store_id", storeId).order("sort_order").order("name"),
@@ -89,12 +101,12 @@ export async function managementData(auth: Auth, requestedStoreId: string | null
     loadManagementOrders(auth, storeId, central),
     editablePreference ? supabase.from("drivers").select("profile_id,profiles!inner(full_name,blocked)").eq("approval_status", "approved").eq("profiles.blocked", false) : null,
     central ? supabase.from("market_store_members").select("user_id,role,profiles!inner(full_name,blocked)").eq("store_id", storeId) : null,
+    central ? loadStoreReadiness(auth, storeId) : null,
   ]);
-  for (const response of [storeResult, openResult, categories, products, groups, options, drivers, members]) if (response) managementError(response.error);
-  if (!storeResult.data) throw new ApiError(404, "Loja não encontrada.", "MARKET_STORE_NOT_FOUND");
+  for (const response of [openResult, categories, products, groups, options, drivers, members]) if (response) managementError(response.error);
   const readProfile = (value: unknown) => (Array.isArray(value) ? value[0] : value) as { full_name?: string; blocked?: boolean } | null;
   return {
-    ...empty, store: storeResult.data as ManageStore, openNow: openResult.data === true, role,
+    ...empty, store: storeResult.data as ManageStore, openNow: openResult.data === true, role, storeReadiness,
     categories: categories?.data ?? [], products: products?.data ?? [], groups: groups?.data ?? [], options: options?.data ?? [],
     orders: orderRead.orders, cashSchemaReady: orderRead.cashSchemaReady, cashWritesEnabled: operationsEnabled && orderRead.cashSchemaReady,
     drivers: (drivers?.data ?? []).map((driver) => ({ id: driver.profile_id, name: readProfile(driver.profiles)?.full_name || "Entregador" })).sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
@@ -106,7 +118,8 @@ export async function managementData(auth: Auth, requestedStoreId: string | null
 export async function applyManagementAction(auth: Auth, input: ManageAction) {
   const { supabase, user } = auth;
   if (input.action === "cashAction") await requireMarketplaceOperations(supabase);
-  if ("storeId" in input) await requireManageStore(auth, input.storeId, input.action === "setPreferredDriver");
+  if (input.action === "setPreferredDriver") await requirePreferredDriverStore(auth, input.storeId);
+  else if ("storeId" in input) await requireManageStore(auth, input.storeId);
   if ("orderId" in input) {
     await requireManagementOrder(supabase, input.storeId, input.orderId);
     const common = { p_actor_id: user.id, p_order_id: input.orderId };

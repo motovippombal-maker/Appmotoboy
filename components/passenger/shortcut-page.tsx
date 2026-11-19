@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, ChevronRight, Headphones, History, Home, Ticket } from "lucide-react";
+import { Bell, ChevronRight, Headphones, History, Ticket } from "lucide-react";
 import { useMotoVip, type HistoryRide } from "@/hooks/use-moto-vip";
 import { RideServiceSummary } from "@/components/passenger/ride-service-booking";
+import { ServiceNavigation } from "@/components/passenger/service-navigation";
 import { getRideService } from "@/lib/ride-service";
 
 type Section = "corridas" | "cupons" | "notificacoes" | "suporte";
@@ -125,7 +126,8 @@ export function PassengerShortcutPage({ section }: { section: Section }) {
   const current = shortcuts.find((item) => item.section === section)!;
   return <div className="app-role-passenger shortcut-page">
     <header className="shortcut-header"><Link href="/" aria-label="Voltar ao início"><Image src="/brand/motopombal-wordmark.png" alt="MotoPombal" width={180} height={90} /></Link><span>{backend.profile?.full_name || "Passageiro"}</span></header>
-    <nav className="shortcut-nav" aria-label="Atalhos do passageiro"><Link href="/"><Home aria-hidden="true" />Início</Link>{shortcuts.map(({ section: item, href, label, icon: Icon }) => <Link href={href} key={item} className={section === item ? "active" : ""} aria-current={section === item ? "page" : undefined}><Icon aria-hidden="true" />{label}{item === "notificacoes" && backend.unreadNotifications > 0 && <b className="shortcut-badge" aria-label={`${backend.unreadNotifications} não lidas`}>{backend.unreadNotifications}</b>}</Link>)}</nav>
+    <div className="shortcut-service-navigation"><ServiceNavigation /></div>
+    <nav className="shortcut-nav" aria-label="Atalhos do passageiro">{shortcuts.map(({ section: item, href, label, icon: Icon }) => <Link href={href} key={item} className={section === item ? "active" : ""} aria-current={section === item ? "page" : undefined}><Icon aria-hidden="true" />{label}{item === "notificacoes" && backend.unreadNotifications > 0 && <b className="shortcut-badge" aria-label={`${backend.unreadNotifications} não lidas`}>{backend.unreadNotifications}</b>}</Link>)}</nav>
     <main className="shortcut-main"><Link href="/" className="shortcut-back">‹ Voltar ao mapa</Link><h1>{current.label}</h1>
       {backend.loading ? <p role="status">Carregando…</p> : !backend.session ? <p>Entre na sua conta para acessar esta seção. <Link href="/">Ir para o início</Link></p> : backend.profile?.role !== "passenger" ? <p>Esta seção é exclusiva do passageiro. <Link href="/">Voltar ao início</Link></p> : <>
         {section === "corridas" && <HistoryContent backend={backend} />}

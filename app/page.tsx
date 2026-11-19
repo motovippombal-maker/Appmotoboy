@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Suspense, useEffect, useEffectEvent, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -76,6 +77,7 @@ import { selectDriverRide } from "@/lib/driver/ride-authority";
 import { driverGpsSampleIssue, shouldAcceptGpsFix } from "@/lib/tracking/driver-gps";
 import { PassengerCentral } from "@/components/passenger/passenger-central";
 import { DeliveryDetailsForm, RideServicePicker, RideServiceSummary } from "@/components/passenger/ride-service-booking";
+import { ServiceNavigation } from "@/components/passenger/service-navigation";
 import { getRideService, rideServiceSchema, type RideServiceDetails, type RideServiceType } from "@/lib/ride-service";
 import { loadSavedPlaces, persistSavedPlaces, type SavedPlace } from "@/lib/passenger/saved-places";
 import {
@@ -1354,6 +1356,7 @@ function PassengerMobilePanel({
 function PassengerPanel({ backend }: { backend: Backend }) {
   const [serviceType, setServiceType] = useState<RideServiceType>("passenger");
   const serviceTypeRef = useRef<RideServiceType>("passenger");
+  const deliveryLinkApplied = useRef(false);
   const [serviceDetails, setServiceDetails] = useState<RideServiceDetails>({});
   const [originAddress, setOriginAddress] = useState("");
   const [destinationAddress, setDestinationAddress] = useState("");
@@ -1544,6 +1547,13 @@ function PassengerPanel({ backend }: { backend: Backend }) {
 
   function changeService(next: RideServiceType) {
     if (next === serviceType || rideRequestInFlight.current) return;
+    if (next === "passenger") {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("servico") === "entrega") {
+        url.searchParams.delete("servico");
+        window.history.replaceState(null, "", url);
+      }
+    }
     quoteRequestRef.current += 1;
     setServiceType(next);
     serviceTypeRef.current = next;
@@ -1563,6 +1573,21 @@ function PassengerPanel({ backend }: { backend: Backend }) {
     setNotice("");
     setSheetMode("expanded");
   }
+
+  const applyDeliveryLink = useEffectEvent(() => {
+    if (stage !== "draft" && stage !== "quote") return;
+    if (deliveryLinkApplied.current || rideRequestInFlight.current) return;
+    if (new URLSearchParams(window.location.search).get("servico") !== "entrega") return;
+    deliveryLinkApplied.current = true;
+    if (serviceType === "passenger") changeService("delivery");
+  });
+  useEffect(() => {
+    if (stage !== "draft" && stage !== "quote") return;
+    // The initial render matches the server; a link to Entrega switches to
+    // the existing booking flow only after this passenger panel is ready.
+    const timer = window.setTimeout(() => applyDeliveryLink(), 0);
+    return () => window.clearTimeout(timer);
+  }, [stage]);
   useEffect(() => {
     if (stage !== "arrived" || !ride?.id) return;
     const key = `motopombal:arrival-alert:${ride.id}`;
@@ -2366,11 +2391,15 @@ function PassengerPanel({ backend }: { backend: Backend }) {
             );
           }}
         />
-        {(stage === "draft" || stage === "quote") && <><nav className="market-entry" aria-label="Serviços MotoPombal">
-          <button type="button" aria-pressed={serviceType === "passenger"} disabled={busy} onClick={() => changeService("passenger")}><Bike size={18} /> Transporte</button>
-          <button type="button" aria-pressed={serviceType !== "passenger"} disabled={busy} onClick={() => { if (serviceType === "passenger") changeService("delivery"); }}><Navigation size={18} /> Entrega</button>
-          <Link href="/compras"><ShoppingCart size={18} /> Compras</Link>
-        </nav>{serviceType !== "passenger" && <RideServicePicker value={serviceType} onChange={changeService} disabled={busy} deliveriesOnly />}</>}
+        {(stage === "draft" || stage === "quote") && <>
+          <ServiceNavigation
+            current={serviceType === "passenger" ? "transport" : "delivery"}
+            onTransport={() => changeService("passenger")}
+            onDelivery={() => { if (serviceType === "passenger") changeService("delivery"); }}
+            disabled={busy}
+          />
+          {serviceType !== "passenger" && <RideServicePicker value={serviceType} onChange={changeService} disabled={busy} deliveriesOnly />}
+        </>}
         {stage === "draft" && <div className="passenger-home-sheet">
           <div className="passenger-service-gateway" aria-label="Serviços MotoPombal">
             <button type="button" onClick={() => { changeService("passenger"); setDestinationSearchOpen(true); }}><Bike /><span><b>Pedir moto</b><small>Seu transporte rápido e seguro pela cidade.</small></span></button>
@@ -5316,6 +5345,7 @@ function DriverPanel({ backend }: { backend: Backend }) {
 
 export default function Home() {
   const backend = useMotoVip();
+  const router = useRouter();
   const [recoverableOfflineRide, setRecoverableOfflineRide] = useState<OfflineRidePackage | null>(null);
   const backendRef = useRef(backend);
   const pushContextOpened = useRef(false);
@@ -5328,10 +5358,14 @@ export default function Home() {
     return () => { active = false; };
   }, [backend.session?.user.id]);
   useEffect(() => {
-    if (backend.loading || !backend.session || pushContextOpened.current) return;
+    if (backend.loading || !backend.session || backend.passwordRecovery) return;
     const url = new URL(window.location.href);
     const open = url.searchParams.get("open");
-    if (open !== "notifications" && open !== "driver-queue") return;
+    if (open === "comerciante") {
+      router.replace("/comerciante");
+      return;
+    }
+    if (pushContextOpened.current || (open !== "notifications" && open !== "driver-queue")) return;
     pushContextOpened.current = true;
     void backendRef.current.refresh().catch(() => undefined).finally(() => {
       if (open === "driver-queue" && backendRef.current.profile?.role === "driver") {
@@ -5344,7 +5378,7 @@ export default function Home() {
       url.searchParams.delete("open");
       window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
     });
-  }, [backend.loading, backend.session]);
+  }, [backend.loading, backend.session, backend.passwordRecovery, router]);
   const role = backend.profile?.role || (recoverableOfflineRide?.driverId === backend.session?.user.id ? "driver" : "passenger");
   const contextLabel =
     role === "passenger"
@@ -5364,23 +5398,22 @@ export default function Home() {
   if (backend.passwordRecovery) return <PasswordRecovery backend={backend} />;
   if (!backend.session)
     return (
-      <AuthPortal
-        onSignIn={async (phone, password) => {
-          const { error } = await backend.signIn(phone, password);
-          return { error };
-        }}
-        onSignUp={async (input) => {
-          const { error } = await backend.signUp(input);
-          return { error, message: error ? undefined : "Conta criada. Entrando…" };
-        }}
-        onReset={async (phone) => {
-          const { error, message } = await backend.resetPassword(phone);
-          return {
-            error,
-            message: error ? undefined : message,
-          };
-        }}
-      />
+      <Suspense fallback={<p role="status">Carregando acesso…</p>}>
+        <AuthPortal
+          onSignIn={async (phone, password) => {
+            const { error } = await backend.signIn(phone, password);
+            return { error };
+          }}
+          onSignUp={async (input) => {
+            const { error } = await backend.signUp(input);
+            return { error, message: error ? undefined : "Conta criada. Entrando…" };
+          }}
+          onReset={async (phone) => {
+            const { error, message } = await backend.resetPassword(phone);
+            return { error, message: error ? undefined : message };
+          }}
+        />
+      </Suspense>
     );
   return (
     <Tabs value={role} className={`app-root app-role-${role}`}>

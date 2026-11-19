@@ -11,14 +11,15 @@ const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" 
 export const marketMoney = (cents: number) => brl.format(cents / 100);
 const weekdays = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
 
-export function MarketStorefront({ catalog, demo = false, cartItems = 0, onSelect, delivery }: {
+export function MarketStorefront({ catalog, mode = "live", cartItems = 0, onSelect, delivery }: {
   catalog: MarketCatalog;
-  demo?: boolean;
+  mode?: "live" | "demo" | "preview";
   cartItems?: number;
   onSelect: (product: MarketProduct) => void;
   delivery?: ReactNode;
 }) {
   const { store, categories, products } = catalog;
+  const demo = mode === "demo";
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const searchId = useId();
@@ -50,11 +51,11 @@ export function MarketStorefront({ catalog, demo = false, cartItems = 0, onSelec
     { icon: Store, label: demo ? "Conheça a loja modelo" : "Conheça a loja" },
     { icon: SlidersHorizontal, label: "Personalize seus favoritos" },
     { icon: ShoppingBag, label: "Revise sua sacola" },
-    { icon: ReceiptText, label: demo ? "Confira a simulação" : "Acompanhe seu pedido" },
+    { icon: ReceiptText, label: mode === "live" ? "Acompanhe seu pedido" : "Confira a simulação" },
   ];
 
   return <div className={`market-storefront${demo ? " market-storefront-demo" : ""}`}>
-    <Link className="market-back" href="/compras" prefetch={demo ? false : undefined}><ArrowLeft size={17} aria-hidden="true" /> Todas as lojas</Link>
+    {mode !== "preview" && <Link className="market-back" href="/compras" prefetch={demo ? false : undefined}><ArrowLeft size={17} aria-hidden="true" /> Todas as lojas</Link>}
     <header className="market-storefront-hero">
       <div className="market-storefront-cover">
         <MarketImage src={store.cover_url} className="market-storefront-cover-media" eager />
@@ -66,7 +67,7 @@ export function MarketStorefront({ catalog, demo = false, cartItems = 0, onSelec
           <span className="market-storefront-category">{store.category}</span>
           <h1>{store.name}</h1>
         </div>
-        {demo ? <span className="market-storefront-state" data-state="demo">Demonstração</span> :
+        {mode !== "live" ? <span className="market-storefront-state" data-state="demo">{demo ? "Demonstração" : "Prévia privada"}</span> :
           <span className="market-storefront-state" data-state={store.open ? "open" : "closed"}>
             {store.open ? "Aberta para pedidos" : "Fechada no momento"}
           </span>}
@@ -82,6 +83,7 @@ export function MarketStorefront({ catalog, demo = false, cartItems = 0, onSelec
       </div>
     </header>
     {demo && <p className="market-storefront-demo-note"><b>Catálogo ilustrativo.</b> Produtos e preços fictícios. A simulação não envia pedidos nem cobra.</p>}
+    {mode === "preview" && <p className="market-storefront-demo-note">Confira seu cardápio e simule um pedido. A simulação fica apenas nesta tela.</p>}
     {delivery}
     <ol className="market-storefront-steps" aria-label={demo ? "Etapas da demonstração" : "Como comprar"}>
       {steps.map(({ icon: Icon, label }) => <li key={label}>

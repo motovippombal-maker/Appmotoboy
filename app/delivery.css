@@ -60,6 +60,11 @@
   font-size: 11px;
   min-width: 17px;
 }
+.delivery-service-navigation {
+  max-width: 1100px;
+  margin: auto;
+  padding: 12px 18px 0;
+}
 .delivery-nav {
   display: flex;
   align-items: center;
@@ -520,6 +525,9 @@
   .delivery-header {
     padding: 0 15px;
   }
+  .delivery-service-navigation {
+    padding-inline: 15px;
+  }
   .delivery-nav {
     overflow-x: auto;
     padding: 11px 15px;
@@ -788,6 +796,20 @@
   background: #0876f9;
   color: white;
   border-color: #0876f9;
+}
+.delivery-app:not(.delivery-ops) .delivery-header {
+  background: var(--moto-header);
+}
+.delivery-app:not(.delivery-ops) .delivery-primary,
+.delivery-app:not(.delivery-ops) .delivery-nav .active,
+.delivery-app:not(.delivery-ops) .delivery-cuisines button.active {
+  background: var(--moto-action);
+  border-color: var(--moto-action);
+  color: #fff;
+}
+.delivery-app:not(.delivery-ops) .delivery-search button,
+.delivery-app:not(.delivery-ops) .delivery-secondary {
+  color: var(--moto-action);
 }
 .delivery-restaurant-icon,
 .delivery-product-image,

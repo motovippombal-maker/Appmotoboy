@@ -1,6 +1,8 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   ArrowRight,
@@ -53,6 +55,7 @@ function MotorcycleGlyph() {
 }
 
 export function AuthPortal({ onSignIn, onSignUp, onReset }: Props) {
+  const merchantAccess = useSearchParams()?.get("open") === "comerciante";
   const [mode, setMode] = useState<Mode>("login");
   const [role, setRole] = useState<Role>("passenger");
   const [form, setForm] = useState({
@@ -176,17 +179,16 @@ export function AuthPortal({ onSignIn, onSignUp, onReset }: Props) {
   }
 
   function goBack() {
-    if (mode === "register") changeMode("role");
+    if (mode === "register" && !merchantAccess) changeMode("role");
     else changeMode("login");
   }
 
-  const title = mode === "login"
-    ? <>Entre na sua <em>conta</em></>
-    : mode === "role"
-      ? <>Como você quer usar o <em>MotoPombal?</em></>
-      : mode === "register"
-        ? <>Crie sua conta de <em>{role === "driver" ? "motorista" : "passageiro"}</em></>
-        : <>Recupere seu <em>acesso</em></>;
+  const titles = {
+    login: merchantAccess ? <>Acesse sua <em>loja</em></> : <>Entre na sua <em>conta</em></>,
+    role: <>Como você quer usar o <em>MotoPombal?</em></>,
+    register: merchantAccess ? <>Crie seu acesso de <em>lojista</em></> : <>Crie sua conta de <em>{role === "driver" ? "motorista" : "passageiro"}</em></>,
+    reset: <>Recupere seu <em>acesso</em></>,
+  };
 
   return (
     <main className="auth-page syxp-auth-page">
@@ -200,7 +202,7 @@ export function AuthPortal({ onSignIn, onSignUp, onReset }: Props) {
         </nav>
         <div className="auth-header-actions">
           <button type="button" onClick={scrollToLogin}>ENTRAR</button>
-          <button type="button" className="gold" onClick={scrollToLogin}><MotorcycleGlyph /> PEDIR UMA MOTO</button>
+          <button type="button" className="gold" onClick={scrollToLogin}><MotorcycleGlyph /> {merchantAccess ? "ACESSAR PAINEL" : "PEDIR UMA MOTO"}</button>
         </div>
       </header>
 
@@ -211,16 +213,16 @@ export function AuthPortal({ onSignIn, onSignUp, onReset }: Props) {
           <div className="auth-hero-shade" />
           <div className="auth-brand-copy">
             <Image src="/brand/motopombal-wordmark.png" alt="MotoPombal" width={560} height={280} priority />
-            <h1><span className="auth-title-white">Mobilidade rápida<br className="auth-mobile-break" /> e segura em</span>{" "}<span className="auth-title-city">Ribeira do Pombal.</span></h1>
-            <p>Peça sua moto pelo celular de forma simples, rápida e segura.</p>
+            <h1><span className="auth-title-white">{merchantAccess ? "Venda em" : <>Mobilidade rápida<br className="auth-mobile-break" /> e segura em</>}</span>{" "}<span className="auth-title-city">Ribeira do Pombal.</span></h1>
+            <p>{merchantAccess ? "Cadastre sua loja, monte o catálogo e acompanhe seus pedidos." : "Peça sua moto pelo celular de forma simples, rápida e segura."}</p>
             <div className="auth-hero-benefits" aria-label="Rápida, segura e local">
               <span><i><Zap aria-hidden="true" /></i><b>Rápida</b></span>
               <span><i><ShieldCheck aria-hidden="true" /></i><b>Segura</b></span>
               <span><i><MapPin aria-hidden="true" /></i><b>Local</b></span>
             </div>
             <div className="auth-hero-actions">
-              <button type="button" onClick={scrollToLogin}>PEDIR UMA MOTO <ArrowRight /></button>
-              <button type="button" onClick={startDriverRegistration}>QUERO SER MOTORISTA</button>
+              <button type="button" onClick={scrollToLogin}>{merchantAccess ? "ACESSAR MEU PAINEL" : "PEDIR UMA MOTO"} <ArrowRight /></button>
+              {!merchantAccess && <button type="button" onClick={startDriverRegistration}>QUERO SER MOTORISTA</button>}
             </div>
           </div>
         </div>
@@ -228,11 +230,11 @@ export function AuthPortal({ onSignIn, onSignUp, onReset }: Props) {
         <section className={`auth-card auth-mode-${mode}`} id="acesso" aria-labelledby="auth-title">
           {mode !== "login" && <button className="auth-back" type="button" onClick={goBack} disabled={busy}><ChevronLeft /> Voltar</button>}
           <span className="auth-kicker">{mode === "reset" ? "RECUPERAÇÃO DE ACESSO" : mode === "role" ? "COMECE EM SEGUNDOS" : "ACESSO SEGURO"}</span>
-          <h2 id="auth-title">{title}</h2>
+          <h2 id="auth-title">{titles[mode]}</h2>
           <p>
-            {mode === "login" && "Use seu celular ou WhatsApp para continuar."}
+            {mode === "login" && (merchantAccess ? "Entre com sua conta MotoPombal para cadastrar ou gerenciar sua loja." : "Use seu celular ou WhatsApp para continuar.")}
             {mode === "role" && "Escolha seu perfil para criar a conta certa para você."}
-            {mode === "register" && (role === "driver" ? "Cadastre seus dados e sua moto. A análise acontece dentro do app." : "Só o essencial para você pedir sua primeira corrida.")}
+            {mode === "register" && (role === "driver" ? "Cadastre seus dados e sua moto. A análise acontece dentro do app." : merchantAccess ? "Depois de criar sua conta, você poderá cadastrar a loja e seus produtos." : "Só o essencial para você pedir sua primeira corrida.")}
             {mode === "reset" && "Informe o celular cadastrado para ver as orientações de recuperação."}
           </p>
 
@@ -283,12 +285,14 @@ export function AuthPortal({ onSignIn, onSignUp, onReset }: Props) {
                 {busy ? <><span className="button-spinner" /> AGUARDE…</> : mode === "login" ? <>Entrar <ArrowRight /></> : mode === "register" ? <>{role === "driver" ? "Criar conta de motorista" : "Criar conta"} <ArrowRight /></> : <>Ver orientações <ArrowRight /></>}
               </Button>
               {mode === "login" && (
-                <button className="auth-create-account" type="button" onClick={() => changeMode("role")} disabled={busy}>
+                <button className="auth-create-account" type="button" onClick={() => merchantAccess ? chooseRole("passenger") : changeMode("role")} disabled={busy}>
                   <span>Ainda não tem conta?</span><strong>Criar minha conta</strong><ArrowRight />
                 </button>
               )}
             </form>
           )}
+          {mode === "login" && !merchantAccess && <Link className="auth-merchant-link" href="/?open=comerciante#acesso">Vender no MotoPombal</Link>}
+          {mode === "login" && merchantAccess && <Link className="auth-merchant-link" href="/">Voltar ao início</Link>}
           <small className="auth-byline">MotoPombal</small>
         </section>
       </section>
