@@ -1,5 +1,6 @@
 import type { StoreHours } from "./management";
 import type { MarketCashSnapshot } from "./cash-reconciliation";
+import type { StoreReadiness } from "./store-onboarding-review";
 
 export type ManageStore = {
   id: string; slug: string; name: string; description: string; category: string;
@@ -41,4 +42,5 @@ export type ManagementData = {
   drivers: { id: string; name: string }[];
   members: { user_id: string; role: "owner" | "manager"; name: string; blocked: boolean }[];
   areas: { id: string; name: string; active: boolean }[];
+  storeReadiness?: StoreReadiness | null;
 };

@@ -1,7 +1,8 @@
 import { ApiError, jsonError } from "@/lib/backend/api";
 import { marketplaceOperationsEnabled } from "@/lib/backend/marketplace-operation-mode";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
-import { marketSlug, type MarketGroup, type MarketOption } from "@/lib/marketplace/customer-contract";
+import { marketSlug } from "@/lib/marketplace/customer-contract";
+import { storefrontProducts } from "@/lib/marketplace/storefront-catalog";
 import { MARKET_STORE_FIELDS, marketResponse, storeAvailability, throwMarketError } from "@/lib/marketplace/customer-server";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -20,21 +21,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
       marketplaceOperationsEnabled(supabase),
     ]);
     for (const result of [categories, products, groups, options]) if (result.error) throwMarketError(result.error);
-    const categoryIds = new Set(categories.data?.map(({ id }) => id));
-    const groupOptions = new Map<string, MarketOption[]>();
-    for (const { group_id, ...option } of options.data ?? []) {
-      groupOptions.set(group_id, [...(groupOptions.get(group_id) ?? []), option]);
-    }
-    const productGroups = new Map<string, MarketGroup[]>();
-    for (const { product_id, ...group } of groups.data ?? []) {
-      productGroups.set(product_id, [...(productGroups.get(product_id) ?? []), { ...group, options: groupOptions.get(group.id) ?? [] }]);
-    }
     return marketResponse({
       store: availableStore, categories: categories.data ?? [], checkoutAvailable,
-      products: (products.data ?? []).filter((p) => p.category_id === null || categoryIds.has(p.category_id)).map(({ stock_quantity, ...product }) => {
-        const groups = productGroups.get(product.id) ?? [];
-        return { ...product, available: (stock_quantity === null || stock_quantity > 0) && groups.every((item) => item.options.length >= item.min_select), groups };
-      }),
+      products: storefrontProducts(categories.data ?? [], products.data ?? [], groups.data ?? [], options.data ?? []),
     });
   } catch (error) { return jsonError(error); }
 }

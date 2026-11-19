@@ -31,6 +31,8 @@ export function managementError(error: DatabaseError) {
     MARKET_PAYMENT_CONFLICT: [409, "Já existe um registro com outro valor ou referência. Consulte o histórico da operação."],
     MARKET_REFUND_POLICY_NOT_CONFIGURED: [409, "Estornos e ajustes de caixa aguardam definição operacional."],
     MARKET_DRIVER_UNAVAILABLE: [409, "Selecione um entregador aprovado e com conta ativa."],
+    MARKET_STORE_NOT_APPROVED: [403, "O vínculo de entregador só fica disponível depois da aprovação da loja."],
+    MARKET_STORE_NOT_READY: [409, "Confira as pendências de titular, retirada e catálogo antes de aprovar a loja."],
     MARKET_MEMBER_UNAVAILABLE: [409, "Selecione uma conta existente e ativa."],
     MARKET_REASON_REQUIRED: [400, "Informe o motivo para registrar a ação."],
     MARKET_AREA_UNAVAILABLE: [409, "Selecione uma área de atendimento ativa que permita entregas."],
@@ -66,4 +68,13 @@ export async function requireManagementImageStore(auth: Auth, storeId: string) {
   const { data, error } = await auth.supabase.from("market_stores").select("id").eq("id", storeId).maybeSingle();
   managementError(error);
   if (!data) throw new ApiError(404, "Loja não encontrada.", "MARKET_STORE_NOT_FOUND");
+}
+
+export async function requirePreferredDriverStore(auth: Auth, storeId: string) {
+  await requireManageStore(auth, storeId, true);
+  if (auth.profile.role === "admin") return;
+  const { data, error } = await auth.supabase.from("market_stores").select("id,status,active").eq("id", storeId).maybeSingle();
+  managementError(error);
+  if (!data || data.status !== "approved" || data.active !== true)
+    throw new ApiError(403, "O vínculo de entregador só fica disponível depois da aprovação da loja.", "MARKET_STORE_NOT_APPROVED");
 }

@@ -28,7 +28,7 @@ export function MarketImage({ src, className, eager = false }: {
 }
 
 export function MarketStoreList() {
-  const { address } = useMarketCustomer();
+  const { address, account } = useMarketCustomer();
   const [typed, setTyped] = useState("");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
@@ -37,7 +37,9 @@ export function MarketStoreList() {
   const categories = [...new Set(matching.map((store) => store.category))].filter(Boolean).sort((a, b) => a.localeCompare(b, "pt-BR"));
   const stores = category ? matching.filter((store) => store.category === category) : matching;
   return <>
-    <section className="market-hero"><span className="market-eyebrow">Ribeira do Pombal</span><h1>Compre de lojas da cidade</h1><p>Escolha uma loja, faça seu pedido e acompanhe pelo MotoPombal.</p></section>
+    <section className="market-hero"><span className="market-eyebrow">Ribeira do Pombal</span><h1>Compre de lojas da cidade</h1><p>Escolha uma loja, faça seu pedido e acompanhe pelo MotoPombal.</p>
+      <Link className="market-merchant-link" href={account.loading || account.id ? "/comerciante" : "/?open=comerciante#acesso"} prefetch={false}><Store size={16} aria-hidden="true" /> Vender no MotoPombal</Link>
+    </section>
     <MarketAddress />
     <form className="market-panel market-row" role="search" onSubmit={(event) => { event.preventDefault(); setCategory(""); setQuery(typed.trim()); }}>
       <label className="sr-only" htmlFor="market-store-search">Nome da loja</label>

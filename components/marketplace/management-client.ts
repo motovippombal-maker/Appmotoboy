@@ -13,6 +13,7 @@ export function useMarketplaceManagement<T>(path: string, pollMs = 20_000) {
   const data = snapshot?.data ?? null;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const loadGeneration = useRef(0);
   const requestInFlight = useRef(false);
@@ -54,17 +55,19 @@ export function useMarketplaceManagement<T>(path: string, pollMs = 20_000) {
     if (quiet && requestInFlight.current) return null;
     const generation = ++loadGeneration.current;
     requestInFlight.current = true;
-    if (!quiet) { setError(""); setLoading(true); }
+    if (!quiet) { setError(""); setErrorStatus(null); setLoading(true); }
     try {
       const result = await request<T>(path);
       if (generation !== loadGeneration.current) return null;
       setSnapshot(result);
       setError("");
+      setErrorStatus(null);
       return result.data;
     } catch (problem) {
       if (generation !== loadGeneration.current) return null;
       if (invalidatesMarketSnapshot(statusOf(problem))) setSnapshot(null);
       setError(problem instanceof Error ? problem.message : "Não foi possível atualizar o painel.");
+      setErrorStatus(typeof statusOf(problem) === "number" ? statusOf(problem) as number : null);
       return null;
     } finally {
       if (generation === loadGeneration.current) { requestInFlight.current = false; setLoading(false); }
@@ -91,7 +94,10 @@ export function useMarketplaceManagement<T>(path: string, pollMs = 20_000) {
           invalidateRefresh();
           setSnapshot(null);
           setLoading(false);
-          if (!nextId) setError("Entre na sua conta pelo início do MotoPombal para acessar este painel.");
+          if (!nextId) {
+            setError("Entre na sua conta pelo início do MotoPombal para acessar este painel.");
+            setErrorStatus(401);
+          }
         }
         if (event === "SIGNED_IN" && nextId) {
           window.clearTimeout(signedInTimer);
@@ -115,16 +121,18 @@ export function useMarketplaceManagement<T>(path: string, pollMs = 20_000) {
     if (scope === authScope.current && [401, 403].some((status) => status === statusOf(problem))) {
       invalidateRefresh();
       setSnapshot(null);
+      setError(problem instanceof Error ? problem.message : "Entre novamente para continuar.");
+      setErrorStatus(typeof statusOf(problem) === "number" ? statusOf(problem) as number : null);
     }
   }, [invalidateRefresh]);
 
-  const submit = useCallback(async <R>(action: object): Promise<R> => {
+  const submit = useCallback(async <R>(action: object, endpoint = path): Promise<R> => {
     if (!snapshot) throw signInRequired();
     if (mutationInFlight.current) throw new Error("Aguarde a operação em andamento.");
     mutationInFlight.current = true;
     setBusy(true);
     try {
-      const result = await request<R>(path, action, snapshot.scope);
+      const result = await request<R>(endpoint, action, snapshot.scope);
       await refresh();
       if (result.scope !== authScope.current) throw signInRequired();
       return result.data;
@@ -155,7 +163,7 @@ export function useMarketplaceManagement<T>(path: string, pollMs = 20_000) {
     }
   }, [forgetDeniedSession, request, snapshot]);
 
-  return { data, loading, error, busy, refresh, submit, uploadImage };
+  return { data, loading, error, errorStatus, authenticationRequired: errorStatus === 401, busy, refresh, submit, uploadImage };
 }
 
 export function managementMoney(cents: number) {

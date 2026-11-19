@@ -53,7 +53,7 @@ function ManageImageField({ name, label, value, storeId, upload }: { name: strin
   </div>;
 }
 
-export function StoreFields({ store, newStore = false, upload }: { store?: ManageStore; newStore?: boolean; upload?: UploadImage }) {
+export function StoreFields({ store, newStore = false, upload, canOpen = true }: { store?: ManageStore; newStore?: boolean; upload?: UploadImage; canOpen?: boolean }) {
   return <>
     <div className="mp-manage-fields">
       <label>Nome da loja<input name="name" required minLength={2} maxLength={100} defaultValue={store?.name} /></label>
@@ -65,7 +65,8 @@ export function StoreFields({ store, newStore = false, upload }: { store?: Manag
     </div>
     <label>Descrição<textarea name="description" rows={3} maxLength={1000} defaultValue={store?.description} /></label>
     <p className="mp-manage-caption">Use uma URL pública HTTPS ou {newStore ? "envie arquivos pelo painel após cadastrar a loja" : "envie JPEG, PNG ou WebP de até 3 MB"}. Imagens serão públicas. O preparo é informado pela loja, sem contar o deslocamento.</p>
-    <label><input type="checkbox" name="is_open" defaultChecked={store?.is_open ?? false} /> Receber pedidos no horário configurado</label>
+    {canOpen ? <label><input type="checkbox" name="is_open" defaultChecked={store?.is_open ?? false} /> Receber pedidos no horário configurado</label>
+      : <p className="mp-manage-caption">A abertura para pedidos fica disponível quando a central aprovar e ativar a loja.</p>}
   </>;
 }
 
@@ -103,7 +104,7 @@ export function StoreSettings({ store, busy, send, openNow, upload }: { store: M
     <p><span className="mp-manage-pill">{storeStatusLabel[store.status]}</span> · {openNow ? "Aberta para compras agora" : "Fechada para novas compras"}</p>
     <p className="mp-manage-caption">A central gerencia o endereço físico e a aprovação. É possível fechar a loja temporariamente sem interromper pedidos aceitos.</p>
     <form className="mp-manage-form" onSubmit={submit}><fieldset disabled={busy}>
-      <StoreFields store={store} upload={upload} />
+      <StoreFields store={store} upload={upload} canOpen={store.status === "approved" && store.active} />
       <StoreSchedule value={hours} onChange={setHours} />
       <ApplyButton>Salvar loja</ApplyButton>
     </fieldset></form>

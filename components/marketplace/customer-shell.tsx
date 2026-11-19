@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ShoppingBag, ReceiptText } from "lucide-react";
+import { ShoppingBag, ReceiptText } from "lucide-react";
+import { ServiceNavigation } from "@/components/passenger/service-navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { MarketCart } from "@/lib/marketplace/cart";
 import type { MarketPoint } from "@/lib/marketplace/customer-contract";
@@ -78,12 +79,14 @@ export function MarketCustomerShell({ children }: { children: ReactNode }) {
     }}>
       <div className={`market-shell${storefront ? " market-shell-storefront" : ""}`}>
         <header className="market-top">
-          <Link href="/" aria-label="Voltar ao MotoPombal" prefetch={demo ? false : undefined}><ArrowLeft size={19} /></Link>
-          <Link href="/compras" className="market-wordmark" prefetch={demo ? false : undefined}>MotoPombal <span>Compras</span></Link>
-          {demo ? <span className="market-top-demo">Demonstração</span> : <nav aria-label="Compras">
-            {cart && <Link href={`/compras/lojas/${cart.slug}#carrinho`} aria-label={`Carrinho com ${cart.entries.length} seleções`}><ShoppingBag size={19} /> <b>{cart.entries.length}</b></Link>}
-            <Link href="/compras/pedidos" aria-label="Meus pedidos"><ReceiptText size={19} /></Link>
-          </nav>}
+          <div className="market-top-inner">
+            <Link href="/compras" className="market-wordmark" prefetch={demo ? false : undefined}>MotoPombal <span>Compras</span></Link>
+            <ServiceNavigation current="shopping" />
+            {demo ? <span className="market-top-demo">Demonstração</span> : <nav className="market-top-actions" aria-label="Pedidos e carrinho">
+              {cart && <Link href={`/compras/lojas/${cart.slug}#carrinho`} aria-label={`Carrinho com ${cart.entries.length} seleções`}><ShoppingBag size={19} aria-hidden="true" /> <b>{cart.entries.length}</b></Link>}
+              <Link href="/compras/pedidos" aria-label="Meus pedidos"><ReceiptText size={19} aria-hidden="true" /></Link>
+            </nav>}
+          </div>
         </header>
         <main className="market-main" key={session.generation}>{children}</main>
       </div>

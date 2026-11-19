@@ -13,7 +13,7 @@ Foram reaproveitados Supabase Auth e os papéis existentes, as áreas de atendim
 | Cliente | Início → **Compras**, `/compras` | Busca lojas e filtra categorias, confirma endereço atendido, abre a loja por link e vê horário e situação. Catálogo consulta dados reais da loja aprovada. |
 | Compra | `/compras/lojas/[slug]` | Configura opções e quantidades, confirma troca de loja, recebe cotação, confere o total e faz checkout em dinheiro. |
 | Pedido | `/compras/pedidos` e `/compras/pedidos/[id]` | Acompanha preparação, busca do entregador, entrega, ocorrência e recebimento. Consulta tentativa anterior sem repetir o POST. |
-| Comerciante | `/comerciante` | Edita loja, horário e abertura; gerencia catálogo, opções, preços e estoque; aceita/recusa, marca pronto e consulta pedidos e repasses. O acesso vem do vínculo com a loja, independentemente do papel global da conta. |
+| Comerciante | **Vender no MotoPombal** → `/comerciante` | Cadastra a própria loja, prepara perfil, horário e catálogo e testa a sacola em uma prévia privada. Após aprovação da central, controla a abertura e acompanha pedidos e repasses. O acesso vem do vínculo com a loja, independentemente do papel global da conta. |
 | Central | `/admin/marketplace` | Cadastra/aprova/suspende loja, define retirada e área, vincula responsáveis e entregador aprovado, consulta pedidos, registra exceções e pode intervir com histórico. |
 | Entregador | Área do motorista e `/motorista/compras` | Aceita ou recusa, confirma chegada/retirada/entrega, consulta valor a cobrar e registra recebimento. O histórico de Compras permite registrar o recebimento mesmo após fechar a tela de conclusão. |
 
@@ -36,7 +36,17 @@ O GPS reutiliza o watcher, os filtros de qualidade, a fila de envio, a comparaç
 
 Escopo inicial: uma loja por carrinho, venda por unidade/variações, operação em Ribeira do Pombal, dinheiro na entrega. Cupons de mototáxi/entrega avulsa permanecem no fluxo atual; não há cupom de Compras nesta versão. Imagens são exibidas sem proxy do servidor. O comerciante pode usar URL pública HTTPS validada ou enviar PNG, JPEG ou WebP de até 3 MiB, com verificação de tipo/assinatura e vinculação à loja. As fotos são públicas; não suba arquivos privados. Arquivos enviados e não utilizados podem permanecer no bucket para limpeza administrativa. Ainda não há avaliações de loja, substituições, venda por peso variável, multiloja, carrinho persistente entre sessões ou múltiplas cidades. As listas mostram registros recentes do primeiro lote; não há paginação histórica completa. Não há promessa de GPS contínuo com o PWA fechado ou tela bloqueada.
 
-## Migrations e configuração pendente
+## Autoatendimento de lojas — novembro de 2026
+
+O botão **Vender no MotoPombal** está no login e em **Compras**. A pessoa entra com a conta existente ou cria uma conta e segue para o painel. Ao cadastrar nome, categoria, identificador público e ponto de retirada, a conta recebe o vínculo de proprietário na mesma transação que cria a loja. O novo estabelecimento começa em análise, fora da listagem pública. A chave de tentativa permite repetir o mesmo envio após falha de conexão.
+
+No painel, o responsável pode preparar a capa, o logotipo, os horários, os produtos e seus complementos. A aba **Prévia** permite montar uma sacola com os itens do próprio catálogo e confirmar uma simulação local. Para aprovar o cadastro em `/admin/marketplace`, a central confere o responsável, o ponto real de retirada e o catálogo. Na aprovação, a loja de autoatendimento entra na listagem e começa fechada para pedidos. O lojista pode então abrir o atendimento conforme seus horários. As gravações seguem a configuração de ambiente e pausa de Compras.
+
+Para um banco que já recebeu as migrations de Compras até `20261115146000_marketplace_operation_mode.sql`, execute o arquivo abaixo.
+
+1. `20261119120000_marketplace_store_onboarding.sql`.
+
+## Migrations e configuração pendente da implantação inicial
 
 Na entrega inicial, foram criados três arquivos incrementais sem editar migrations existentes. **Naquela entrega**, ainda não haviam sido executados:
 

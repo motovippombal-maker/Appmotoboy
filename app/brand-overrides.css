@@ -1,5 +1,7 @@
 /* MotoVip visual system. Keep application and database identifiers unchanged. */
 :root {
+  --moto-header: #071b42;
+  --moto-action: #0757cb;
   --primary: #086cff;
   --primary-foreground: #fff;
   --accent: #eaf3ff;
@@ -54,6 +56,11 @@ select:focus-visible {
   background: radial-gradient(circle at 55% -100%, #1647a4, transparent 65%), #06142e;
   border-bottom-color: #087dff;
 }
+.syxp-auth-page .auth-site-header,
+.app-role-passenger .topbar,
+.app-role-passenger .shortcut-header {
+  background: var(--moto-header);
+}
 .passenger-top-nav a:hover,
 .passenger-top-nav button:hover,
 .passenger-top-nav .active {
@@ -72,10 +79,11 @@ select:focus-visible {
   color: #fff;
 }
 .app-role-passenger .primary-cta {
+  background: var(--moto-action) !important;
   box-shadow: 0 0 0 2px #9dd7ff, 0 10px 26px rgba(0, 95, 235, .3) !important;
 }
 .app-role-passenger .primary-cta:hover {
-  background: linear-gradient(180deg, #42a5ff, #0667eb) !important;
+  background: var(--moto-action) !important;
 }
 .home-shortcuts > button,
 .app-role-passenger .history-panel,
@@ -149,7 +157,13 @@ select:focus-visible {
 .syxp-auth-page .auth-message { border-color: #3263a3; background: #112b55; color: #d8efff; }
 .auth-byline span { color: #8ed7ff; }
 .button-spinner { border-color: rgba(255, 255, 255, .3); border-top-color: #fff; }
-.syxp-auth-page .primary-cta { color: #fff !important; }
+.syxp-auth-page .primary-cta,
+.syxp-auth-page .auth-header-actions .gold,
+.syxp-auth-page .auth-hero-actions button:first-child {
+  background: var(--moto-action) !important;
+  border-color: var(--moto-action) !important;
+  color: #fff !important;
+}
 .auth-site-header nav a:hover { color: #8ed7ff; }
 .auth-marketing strong,
 .auth-marketing b { color: #8ed7ff; }
@@ -168,7 +182,7 @@ select:focus-visible {
     justify-items: stretch;
     gap: 8px;
     border-bottom: 1px solid #1688ff;
-    background: radial-gradient(circle at 55% -120%, #1253b7, #06142e 72%);
+    background: var(--moto-header);
   }
   .syxp-auth-page .auth-header-brand img {
     width: clamp(110px, 29vw, 150px);
@@ -182,7 +196,7 @@ select:focus-visible {
     align-items: center;
     justify-content: center;
     gap: 6px;
-    border: 1px solid #20c0ff !important;
+    border: 1px solid var(--moto-action) !important;
     border-radius: 11px;
     box-shadow: 0 0 16px rgba(5, 132, 255, .3) !important;
     font-size: clamp(10px, 2.5vw, 13px);
@@ -333,7 +347,7 @@ select:focus-visible {
   .syxp-auth-page .auth-card .primary-cta {
     height: 62px !important;
     margin-top: 2px;
-    border: 1px solid #27c0ff !important;
+    border: 1px solid var(--moto-action) !important;
     border-radius: 16px !important;
     justify-content: center;
     gap: 12px;
@@ -798,6 +812,7 @@ select:focus-visible {
 .auth-create-account strong { margin-top: 2px; font-size: 17px; }
 .auth-create-account > svg { grid-column: 2; grid-row: 1 / span 2; color: #ff5268; }
 .auth-create-account:hover { border-color: #ff5268; background: rgba(223, 26, 54, .22); }
+.auth-merchant-link { display: inline-flex; align-items: center; min-height: 2.75rem; color: #a6daff; font-weight: 650; text-decoration: underline; text-underline-offset: .2em; }
 .auth-mode-register { max-height: calc(100dvh - 36px); overflow-y: auto; overscroll-behavior: contain; }
 .auth-mode-register::-webkit-scrollbar { width: 5px; }
 .auth-mode-register::-webkit-scrollbar-thumb { border-radius: 999px; background: #2569ba; }

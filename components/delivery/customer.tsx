@@ -6,7 +6,6 @@ import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowLeft,
-  Bike,
   Check,
   Clock3,
   Heart,
@@ -23,6 +22,7 @@ import { deliveryApi } from "@/lib/delivery/client";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { AddressResult } from "@/hooks/use-moto-vip";
 import type { LivePoint } from "@/components/map/real-map";
+import { ServiceNavigation } from "@/components/passenger/service-navigation";
 import "@/app/delivery.css";
 
 const RealMap = dynamic(
@@ -761,22 +761,26 @@ export function DeliveryCustomer() {
           )}
         </button>
       </header>
-      <nav className="delivery-nav">
+      <div className="delivery-service-navigation">
+        <ServiceNavigation />
+      </div>
+      <nav className="delivery-nav" aria-label="Navegação de restaurantes">
         <button
+          type="button"
+          aria-pressed={view === "browse" || view === "menu"}
           className={view === "browse" || view === "menu" ? "active" : ""}
           onClick={() => setView("browse")}
         >
           <Utensils /> Restaurantes
         </button>
         <button
+          type="button"
+          aria-pressed={view === "orders" || view === "tracking"}
           className={view === "orders" || view === "tracking" ? "active" : ""}
           onClick={() => void loadOrders()}
         >
           <Clock3 /> Pedidos
         </button>
-        <Link href="/">
-          <Bike /> Pedir moto
-        </Link>
       </nav>
       {error && (
         <p className="delivery-error" role="alert">

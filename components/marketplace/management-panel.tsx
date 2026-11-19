@@ -7,6 +7,10 @@ import type { ManageStore, ManagementData } from "@/lib/marketplace/management-v
 import { ApplyButton, field, numberField, optionalField, StoreFields, storeStatusLabel, storeValues, StoreSettings, MerchantCatalog, PreferredDriver, type MerchantCommand } from "./management-catalog";
 import { useMarketplaceManagement } from "./management-client";
 import { ManagementOrders } from "./management-orders";
+import { MerchantStoreProgress, MerchantStoreRegistration, type MerchantRegistration, type MerchantRegistrationResult } from "./merchant-onboarding";
+import { MerchantStorePreview } from "./merchant-store-preview";
+import { AdminStoreReviewQueue } from "./admin-store-review";
+import { storeReviewIssueLabels } from "@/lib/marketplace/store-onboarding-review";
 
 const merchantEndpoint = "/api/marketplace/merchant";
 const adminEndpoint = "/api/admin/marketplace";
@@ -27,14 +31,25 @@ function PanelHeader({ central, refresh, busy }: { central: boolean; refresh: ()
   </header>;
 }
 
-export function MerchantManagementPanel() {
-  const [storeId, setStoreId] = useState("");
-  const [view, setView] = useState<"orders" | "catalog" | "store">("orders");
+export function MerchantManagementPanel({ initialStoreId = "" }: { initialStoreId?: string }) {
+  const [storeId, setStoreId] = useState(initialStoreId);
+  const [showRegistration, setShowRegistration] = useState(false);
+  const [registrationVersion, setRegistrationVersion] = useState(0);
+  const [view, setView] = useState<"orders" | "catalog" | "store" | "preview" | null>(null);
   const [notice, setNotice] = useState("");
   const [actionError, setActionError] = useState("");
   const backend = useMarketplaceManagement<ManagementData>(`${merchantEndpoint}${storeId ? `?storeId=${encodeURIComponent(storeId)}` : ""}`);
   const { data, error, loading, busy } = backend;
   const store = data?.store && (!storeId || data.store.id === storeId) ? data.store : null;
+  const activeView = view ?? (store?.status === "approved" ? "orders" : "store");
+  const createStore = async (input: MerchantRegistration) => {
+    setNotice(""); setActionError("");
+    const created = await backend.submit<MerchantRegistrationResult>(input, "/api/marketplace/merchant/onboarding");
+    setStoreId(created.storeId); setView("store");
+    setShowRegistration(false); setRegistrationVersion((version) => version + 1);
+    setNotice(created.reused ? "Cadastro encontrado. Confira os dados da sua loja." : "Sua loja foi cadastrada em análise. Prepare agora o perfil e o catálogo.");
+    return created;
+  };
   const send: MerchantCommand = async (action) => {
     setNotice(""); setActionError("");
     const checked = merchantManagementAction.safeParse(action);
@@ -48,24 +63,37 @@ export function MerchantManagementPanel() {
   return <main className="marketplace-management">
     <PanelHeader central={false} busy={loading || busy} refresh={() => void backend.refresh()} />
     <div>
-      {data && <section className="mp-manage-card"><StoreSelection data={data} storeId={storeId} select={(id) => { setStoreId(id); setNotice(""); setActionError(""); }} busy={busy} />
-        {!data.stores.length && <p>Nenhuma loja vinculada a esta conta. Solicite à central o vínculo com uma loja existente.</p>}
+      {data && data.stores.length > 0 && <section className="mp-manage-card"><StoreSelection data={data} storeId={storeId} select={(id) => { setStoreId(id); setView(null); setNotice(""); setActionError(""); }} busy={busy} />
+        <div className="mp-manage-row">
+          <button type="button" className="mp-manage-button secondary" disabled={busy || loading || !data.operationsEnabled} aria-expanded={showRegistration} aria-controls="merchant-additional-registration" onClick={() => setShowRegistration(true)}>Cadastrar outra loja</button>
+          {showRegistration && <button type="button" className="mp-manage-button secondary" disabled={busy} onClick={() => setShowRegistration(false)}>Voltar à loja selecionada</button>}
+        </div>
         {store && <nav className="mp-manage-tabs" aria-label="Áreas do painel da loja">
-          {([ ["orders", "Pedidos"], ["catalog", "Catálogo"], ["store", "Loja e horários"] ] as const).map(([key, title]) => <button className="mp-manage-button secondary" type="button" key={key} aria-pressed={view === key} onClick={() => setView(key)}>{title}</button>)}
+          {([ ["store", "Loja e horários"], ["catalog", "Catálogo"], ["preview", "Prévia da loja"], ["orders", "Pedidos"] ] as const).map(([key, title]) => <button className="mp-manage-button secondary" type="button" key={key} aria-pressed={activeView === key} onClick={() => setView(key)}>{title}</button>)}
         </nav>}
       </section>}
       {loading && <p className="mp-manage-message" role="status">Atualizando painel…</p>}
-      {data && !data.operationsEnabled && <p className="mp-manage-message" role="status">Novas operações em Compras estão indisponíveis no momento. As consultas e as ações de encerramento permitidas continuam disponíveis.</p>}
+      {data && !data.operationsEnabled && <p className="mp-manage-message" role="status">Compras está pausado no momento. Novos cadastros e alterações da loja ficam indisponíveis até a plataforma ser liberada; os dados salvos continuam disponíveis para consulta.</p>}
       {data?.cashSchemaReady === false && <p className="mp-manage-message" role="status">O caixa está em atualização. Registros antigos continuam disponíveis para consulta.</p>}
-      {error && <p className="mp-manage-message error" role="alert">{error} {storeId && <button type="button" className="mp-manage-button secondary" onClick={() => setStoreId("")}>Voltar às lojas vinculadas</button>}</p>}
+      {error && <div className="mp-manage-message error" role="alert"><p>{error}</p>
+        {backend.authenticationRequired ? <Link href="/?open=comerciante#acesso">Entrar ou criar conta para cadastrar minha loja</Link> : <button type="button" className="mp-manage-button secondary" disabled={loading || busy} onClick={() => void backend.refresh()}>Tentar novamente</button>}
+        {storeId && <button type="button" className="mp-manage-button secondary" onClick={() => setStoreId("")}>Voltar às lojas vinculadas</button>}
+      </div>}
       {notice && <p className="mp-manage-message" role="status">{notice}</p>}
       {actionError && <p className="mp-manage-message error" role="alert">{actionError}</p>}
-      {data && store && <div key={`${store.id}:${view}`}>
-        {view === "orders" && <ManagementOrders orders={data.orders} busy={busy} operationsEnabled={data.operationsEnabled} cashWritesEnabled={data.cashWritesEnabled} canPrepare={store.active && store.status === "approved"} send={(action) => send(action as MerchantManagementAction)} />}
-        {view === "catalog" && <MerchantCatalog data={data} store={store} busy={busy || !data.operationsEnabled} send={send} upload={backend.uploadImage} />}
-        {view === "store" && <>
-          <StoreSettings store={store} openNow={data.openNow} busy={busy || !data.operationsEnabled} send={send} upload={backend.uploadImage} />
-          {data.role !== "manager" && <PreferredDriver store={store} drivers={data.drivers} busy={busy || !data.operationsEnabled} onChange={(driverId) => void send({ action: "setPreferredDriver", storeId: store.id, driverId })} />}
+      {data && <div id="merchant-additional-registration" hidden={data.stores.length > 0 && !showRegistration}>
+        <MerchantStoreRegistration key={registrationVersion} busy={busy} disabled={loading || Boolean(error) || !data.operationsEnabled} create={createStore} refresh={() => void backend.refresh()} />
+      </div>}
+      {data && store && <MerchantStoreProgress data={data} store={store} selectView={setView} />}
+      {data && store && <div key={`${store.id}:${activeView}`}>
+        {activeView === "orders" && <ManagementOrders orders={data.orders} busy={busy} operationsEnabled={data.operationsEnabled} cashWritesEnabled={data.cashWritesEnabled} canPrepare={store.active && store.status === "approved"} send={(action) => send(action as MerchantManagementAction)} />}
+        {activeView === "catalog" && <MerchantCatalog data={data} store={store} busy={busy || !data.operationsEnabled} send={send} upload={backend.uploadImage} />}
+        {activeView === "preview" && <MerchantStorePreview data={data} store={store} />}
+        {activeView === "store" && <>
+          <StoreSettings store={store} openNow={data.operationsEnabled && data.openNow} busy={busy || !data.operationsEnabled} send={send} upload={backend.uploadImage} />
+          {data.role !== "manager" && (data.role === "admin" || store.status === "approved" && store.active)
+            ? <PreferredDriver store={store} drivers={data.drivers} busy={busy || !data.operationsEnabled} onChange={(driverId) => void send({ action: "setPreferredDriver", storeId: store.id, driverId })} />
+            : data.role !== "manager" && <p className="mp-manage-caption">O vínculo com entregador preferencial fica disponível após a central aprovar e ativar a loja.</p>}
         </>}
       </div>}
     </div>
@@ -109,17 +137,33 @@ function NewStore({ areas, busy, send, select }: { areas: ManagementData["areas"
 
 function StoreGovernance({ store, data, busy, send }: { store: ManageStore; data: ManagementData; busy: boolean; send: CentralCommand }) {
   const [profile, setProfile] = useState<{ id: string; name: string } | null>(null);
+  const [decision, setDecision] = useState(store.status);
+  const readiness = data.storeReadiness;
+  const needsReview = readiness?.required === true && (store.status !== "approved" || !store.active);
+  const approvingRegistration = needsReview && decision === "approved";
+  const approvalBlocked = approvingRegistration && !readiness.ready;
   return <>
     <section className="mp-manage-card"><h2>Aprovação e retirada</h2>
       <p>{store.name} · <span className="mp-manage-pill">{storeStatusLabel[store.status]}</span></p>
-      <p>{data.openNow ? "Aberta para compras agora" : "Fechada para novas compras"} · {store.address}</p>
+      <p>{data.operationsEnabled && data.openNow ? "Aberta para compras agora" : "Fechada para novas compras"} · {store.address}</p>
+      <p className="mp-manage-caption">Abertura manual da loja: {store.is_open ? "lojista habilitou a abertura" : "fechada pelo lojista"}. Horários e liberação de Compras também são verificados antes de aceitar uma compra.</p>
+      {store.status === "approved" && store.active ? <p><Link href={`/compras/lojas/${encodeURIComponent(store.slug)}`} target="_blank" rel="noopener noreferrer">Conferir vitrine pública da loja</Link></p> : <p className="mp-manage-caption">Esta loja ainda não está publicada no catálogo de Compras.</p>}
+      {needsReview && <div className={readiness.ready ? "mp-manage-message" : "mp-manage-message error"} role="status">
+        <strong>{readiness.ready ? "Cadastro disponível para conferência final" : "Pendências antes da aprovação"}</strong>
+        {readiness.issues.length > 0 && <ul>{readiness.issues.map((issue) => <li key={issue}>{storeReviewIssueLabels[issue]}</li>)}</ul>}
+        <p>A validação automática não substitui a conferência do estabelecimento pela central.</p>
+        {store.status !== "approved" && <p>Ao aprovar este cadastro, a vitrine será liberada e o atendimento permanecerá fechado até o lojista habilitar a abertura.</p>}
+      </div>}
+      {!readiness && <p className="mp-manage-caption" role="status">A lista automática de pendências não está disponível neste ambiente. Os cadastros e as ações anteriores continuam acessíveis; confira os dados antes de decidir.</p>}
       <form className="mp-manage-form" onSubmit={async (event) => {
         event.preventDefault(); const form = event.currentTarget; const values = new FormData(form);
+        if (approvalBlocked || (approvingRegistration && !values.has("approvalReviewed"))) return;
         if (await send({ action: "setStoreStatus", storeId: store.id, status: field(values,"status") as ManageStore["status"], reason: field(values,"reason") })) form.reset();
       }}><fieldset disabled={busy}>
-        <label>Situação pública<select name="status" key={store.status} defaultValue={store.status}><option value="pending">Em análise</option><option value="approved">Aprovada</option><option value="suspended">Suspensa</option></select></label>
+        <label>Situação pública<select name="status" value={decision} onChange={(event) => setDecision(event.target.value as ManageStore["status"])}><option value="pending">Em análise</option><option value="approved">Aprovada</option><option value="suspended">Suspensa</option></select></label>
+        {approvingRegistration && <label><input name="approvalReviewed" type="checkbox" required /> Conferi o estabelecimento, o titular autorizado, o ponto real de retirada e o catálogo desta loja.</label>}
         <label>Motivo da decisão<textarea required minLength={3} maxLength={300} name="reason" rows={2} /></label>
-        <ApplyButton>Registrar situação</ApplyButton>
+        <ApplyButton disabled={approvalBlocked}>Registrar situação</ApplyButton>
       </fieldset></form>
       <hr />
       <form className="mp-manage-form" onSubmit={(event) => { event.preventDefault(); void send({ action: "setStorePickup", storeId: store.id, pickup: pickupValues(new FormData(event.currentTarget)) }); }}><fieldset disabled={busy}>
@@ -192,17 +236,18 @@ export function AdminMarketplacePanel() {
       {notice && <p className="mp-manage-message" role="status">{notice}</p>}
       {actionError && <p className="mp-manage-message error" role="alert">{actionError}</p>}
       {data && <>
+        <AdminStoreReviewQueue stores={data.stores} selectedStoreId={store?.id ?? null} busy={busy} select={(id) => { setStoreId(id); setView("stores"); setNotice(""); setActionError(""); }} />
         <NewStore areas={data.areas} busy={busy || !data.operationsEnabled} send={send} select={setStoreId} />
         <section className="mp-manage-card"><StoreSelection data={data} storeId={storeId} select={(id) => { setStoreId(id); setNotice(""); setActionError(""); }} busy={busy} />
           {!data.stores.length && <p>Nenhuma loja cadastrada no marketplace.</p>}
           {store && <nav className="mp-manage-tabs" aria-label="Áreas da central de compras">
             <button className="mp-manage-button secondary" type="button" aria-pressed={view === "stores"} onClick={() => setView("stores")}>Loja e vínculos</button>
             <button className="mp-manage-button secondary" type="button" aria-pressed={view === "orders"} onClick={() => setView("orders")}>Pedidos e ocorrências</button>
-            <Link href="/comerciante">Editar catálogo pelo painel da loja</Link>
+            <Link href={`/comerciante?loja=${store.id}`}>Editar catálogo pelo painel da loja</Link>
           </nav>}
         </section>
         {store && <div key={`${store.id}:${view}`}>
-          {view === "stores" ? <StoreGovernance store={store} data={data} busy={busy || !data.operationsEnabled} send={send} /> : <ManagementOrders orders={data.orders} busy={busy} operationsEnabled={data.operationsEnabled} cashWritesEnabled={data.cashWritesEnabled} central send={async (action) => Boolean(await send(action as AdminManagementAction))} />}
+          {view === "stores" ? <StoreGovernance key={`${store.id}:${store.status}`} store={store} data={data} busy={busy || !data.operationsEnabled} send={send} /> : <ManagementOrders orders={data.orders} busy={busy} operationsEnabled={data.operationsEnabled} cashWritesEnabled={data.cashWritesEnabled} central send={async (action) => Boolean(await send(action as AdminManagementAction))} />}
         </div>}
       </>}
     </div>
